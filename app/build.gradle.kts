@@ -16,8 +16,8 @@ android {
         applicationId = "io.dilfi5h.agentping"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.0.7"
+        versionCode = 4
+        versionName = "0.0.4"
     }
 
     signingConfigs {
