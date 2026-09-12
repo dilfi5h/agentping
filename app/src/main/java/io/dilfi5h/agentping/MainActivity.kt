@@ -32,6 +32,7 @@ import io.dilfi5h.agentping.ui.TimelineScreen
 import io.dilfi5h.agentping.util.AppLog
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -87,6 +88,11 @@ class MainActivity : ComponentActivity() {
                     messages = messages,
                     connectionState = conn,
                     onRefresh = { PingService.refresh(this) },
+                    onDelete = { id ->
+                        lifecycleScope.launch {
+                            AppDatabase.get(this@MainActivity).dao().delete(id)
+                        }
+                    },
                     modifier = Modifier.padding(pad),
                 )
             } else {

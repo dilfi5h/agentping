@@ -1,6 +1,7 @@
 package io.dilfi5h.agentping.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,18 +12,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,6 +42,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.dilfi5h.agentping.data.MessageEntity
 import io.dilfi5h.agentping.data.StateKind
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 fun stateColor(s: StateKind): Color = when (s) {
     StateKind.STARTED -> StateStarted
@@ -46,15 +53,11 @@ fun stateColor(s: StateKind): Color = when (s) {
     StateKind.WAITING -> StateWaiting
 }
 
-fun relativeTime(ms: Long, now: Long = System.currentTimeMillis()): String {
-    val diff = (now - ms).coerceAtLeast(0) / 1000
-    return when {
-        diff < 60 -> "刚刚"
-        diff < 3600 -> "${diff / 60} 分钟前"
-        diff < 86400 -> "${diff / 3600} 小时前"
-        else -> "${diff / 86400} 天前"
-    }
-}
+/** 卡片时间一律显示东八区绝对时间（多服务器/多时区无歧义）。 */
+private val CST_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
+    .withZone(ZoneId.of("Asia/Shanghai"))
+
+fun absTime(ms: Long): String = CST_FORMAT.format(Instant.ofEpochMilli(ms))
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +65,7 @@ fun TimelineScreen(
     messages: List<MessageEntity>,
     connectionState: String,
     onRefresh: () -> Unit,
+    onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var refreshing by remember { mutableStateOf(false) }
@@ -91,9 +95,45 @@ fun TimelineScreen(
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(messages, key = { it.id }) { m -> MessageCard(m) }
+                items(messages, key = { it.id }) { m ->
+                    SwipeDeleteCard(m, onDelete)
+                }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeDeleteCard(m: MessageEntity, onDelete: (String) -> Unit) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                onDelete(m.id)
+                true
+            } else false
+        }
+    )
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false, // 只支持左滑（从右往左）
+        backgroundContent = {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 24.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "删除",
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        },
+    ) {
+        MessageCard(m)
     }
 }
 
@@ -101,21 +141,32 @@ fun TimelineScreen(
 private fun MessageCard(m: MessageEntity) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
+            // 三要素：主机 · agent 名 · 动作（状态着色）
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(10.dp).background(stateColor(m.stateKind), CircleShape)
-                )
-                Spacer(Modifier.width(8.dp))
                 Text(
-                    "${m.host ?: "?"} · ${m.agent ?: "shell"} ${m.stateKind.label}",
+                    m.host ?: "?",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text("  ·  ", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.outline)
+                Text(
+                    m.agent ?: "shell",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text("  ·  ", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.outline)
+                Text(
+                    m.stateKind.label,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
+                    color = stateColor(m.stateKind),
                 )
+                Spacer(Modifier.weight(1f))
                 Surface(shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(
-                        relativeTime(m.time),
+                        absTime(m.time),
                         Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
                     )

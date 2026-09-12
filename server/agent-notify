@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# agent-notify — AgentPing reporter v1（DESIGN.md §3.5）
+# 用法: agent-notify <started|finished|failed|waiting> [选项]
+#   --agent <name>   默认 shell
+#   --host <name>    默认 hostname -s
+#   --task <text>    摘要（≤80 字符）
+#   --detail <text>  补充（≤500 字符）
+#   --session <id>
+#   --dur <ms>
+# 配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf
+# 行为约束: 任何自身错误 → stderr 一行 + exit 0；永不阻塞、永不影响 agent 退出码
+
+STATE="${1:-}"; shift 2>/dev/null || true
+AGENT="shell"
+HOST="${AGENTPING_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
+TASK=""; DETAIL=""; SESSION=""; DUR=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --agent)   AGENT="$2";   shift 2 ;;
+    --host)    HOST="$2";    shift 2 ;;
+    --task)    TASK="$2";    shift 2 ;;
+    --detail)  DETAIL="$2";  shift 2 ;;
+    --session) SESSION="$2"; shift 2 ;;
+    --dur)     DUR="$2";     shift 2 ;;
+    *)         shift ;;
+  esac
+done
+
+[ -n "$STATE" ] || { echo "agent-notify: missing state" >&2; exit 0; }
+case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad state '$STATE'" >&2; exit 0 ;; esac
+
+if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
+  [ -f /etc/agentping.conf ] && . /etc/agentping.conf
+fi
+[ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
+[ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
+
+# 优先级/emoji 映射（§3.3）
+case "$STATE" in
+  started)  PRIO=low;     TAGS="robot,arrow_forward";            LABEL="开始运行" ;;
+  finished) PRIO=default; TAGS="robot,white_check_mark";         LABEL="已完成" ;;
+  failed)   PRIO=high;    TAGS="robot,x";                        LABEL="失败" ;;
+  waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="等待批准" ;;
+esac
+
+# JSON 字符串转义 + 截断（\b\f 也不该出现在正常文本里，一并兜住换行）
+esc() {
+  local s="$1" max="$2"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/ }"
+  s="${s//$'\r'/}"
+  printf '%s' "${s:0:$max}"
+}
+
+HOST=$(esc "$HOST" 64)
+AGENT=$(esc "$AGENT" 32)
+STATE=$(esc "$STATE" 16)
+TASK=$(esc "$TASK" 80)
+DETAIL=$(esc "$DETAIL" 500)
+SESSION=$(esc "$SESSION" 64)
+TITLE="[${HOST}] ${AGENT} ${LABEL}"
+
+# 单行 JSON 载荷（§3.2）
+JSON="{\"v\":1,\"agent\":\"${AGENT}\",\"host\":\"${HOST}\",\"state\":\"${STATE}\""
+[ -n "$TASK" ]    && JSON="${JSON},\"task\":\"${TASK}\""
+[ -n "$DETAIL" ]  && JSON="${JSON},\"detail\":\"${DETAIL}\""
+[ -n "$SESSION" ] && JSON="${JSON},\"session\":\"${SESSION}\""
+[ -n "$DUR" ]     && JSON="${JSON},\"dur\":${DUR%%[!0-9]*}"
+JSON="${JSON}}"
+
+# 双写总 topic（§3.3）：agentping-<host> 保留给官方 App，agentping-all 给 AgentPing
+for TOPIC in "agentping-${HOST}" "agentping-all"; do
+  curl -m 5 -s -o /dev/null \
+    -H "Authorization: Bearer ${AGENTPING_TOKEN}" \
+    -H "Title: ${TITLE}" \
+    -H "Tags: ${TAGS}" \
+    -H "Priority: ${PRIO}" \
+    -H "Markdown: no" \
+    --data-binary "$JSON" \
+    "${AGENTPING_URL}/${TOPIC}" || true
+done
+exit 0

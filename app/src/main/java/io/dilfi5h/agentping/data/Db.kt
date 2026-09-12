@@ -48,6 +48,9 @@ interface MessageDao {
     @Query("SELECT id FROM messages ORDER BY time DESC LIMIT 1")
     suspend fun lastId(): String?
 
+    @Query("DELETE FROM messages WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Query("DELETE FROM messages WHERE time < :before")
     suspend fun prune(before: Long)
 }

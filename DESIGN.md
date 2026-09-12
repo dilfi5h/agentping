@@ -5,7 +5,8 @@
 > 与 PiPilot 平行独立（PiPilot = 操控，AgentPing = 通知），不复用代码。
 
 状态：设计定稿 2026-09-12。进度：M1 服务器 ✅（见 §5）、M3 App MVP ✅（v0.0.1 已发，
-仓库 github.com/dilfi5h/agentping，verify 走 tag→CI→deb 拉取）、M2 钩子未开工。
+仓库 github.com/dilfi5h/agentping，verify 走 tag→CI→deb 拉取）、M2 进行中（agent-notify ✅ +
+pi 钩子 ✅，zcode/claude 未接）。
 补充定稿（2026-09-12 开工会）：① topic 发现 = reporter 双写总 topic（见 §3.3/§3.4）；② waiting 是只读快照、无解除事件；③ 钩子路径不带 `dur`（仅 L2 包装提供）；④ 时间线排序一律用 ntfy 帧 `time`，`ts` 仅展示。
 
 ## 1. 目标与非目标
@@ -144,7 +145,7 @@ agent-notify <state> [选项]
 
 | agent | 触发机制 | 事件 → 状态映射 |
 |---|---|---|
-| **pi** | extension（`~/.pi/agent/extensions/agentping.js`，订阅 agent 生命周期事件；具体 API 开工时对 vendor 源码） | agent_start→started, agent_end(无错)→finished, agent_end(willRetry耗尽/错误)→failed |
+| **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段)，`agent_end`(stopReason=error)→failed(detail=错误原文)，`agent_settled`→finished（本 run 已推 failed 则跳过） |
 | **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用） | `SessionStart`→started, `Stop`→finished, `PostToolUseFailure`→不推(噪音)，`PermissionRequest`→waiting；matcher 注意大小写敏感正则；command 型钩子 timeout 单位是秒 |
 | **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
 | **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
