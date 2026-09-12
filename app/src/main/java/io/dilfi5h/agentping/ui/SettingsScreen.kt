@@ -151,8 +151,13 @@ fun SettingsScreen(
             Text("复制日志（${AppLog.size()} 条）")
         }
 
+        val version = remember {
+            runCatching {
+                ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+            }.getOrNull() ?: "?"
+        }
         Text(
-            "AgentPing v1 · 只读推送。任何字段解析失败的消息会按纯文本展示。",
+            "AgentPing v$version · 只读推送。任何字段解析失败的消息会按纯文本展示。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
