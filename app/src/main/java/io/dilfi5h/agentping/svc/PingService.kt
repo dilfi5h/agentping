@@ -44,6 +44,7 @@ class PingService : Service() {
 
     private val kick = MutableStateFlow(0)
     private var loopJob: kotlinx.coroutines.Job? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -53,6 +54,10 @@ class PingService : Service() {
         stream = NtfyStream(scope, ::onFrame, ::onConnState)
         createChannels()
         registerNetworkCallback()
+        // VPN 类 App 在后台被杀/重连时会带走所有 socket，重连定时器需要 CPU 活着才有效
+        wakeLock = getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "AgentPing:ws")
+            .also { it.acquire(24 * 3600_000L) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -86,6 +91,8 @@ class PingService : Service() {
 
     override fun onDestroy() {
         AppLog.log("SVC", "onDestroy")
+        wakeLock?.release()
+        wakeLock = null
         scope.cancel()
         super.onDestroy()
     }
