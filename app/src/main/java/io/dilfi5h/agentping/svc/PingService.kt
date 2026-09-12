@@ -153,8 +153,12 @@ class PingService : Service() {
             AppLog.log("DB", "dup id=${entity.id}")
             return
         }
-        AppLog.log("DB", "new id=${entity.id} state=${entity.state} host=${entity.host}")
-        notifyMessage(entity)
+        // 回放/补拉的历史消息（重装首连、下拉刷新）只进时间线，不发通知
+        if (System.currentTimeMillis() - entity.time > 5 * 60_000L) {
+            AppLog.log("NOTIF", "backfill id=${entity.id} (${(System.currentTimeMillis() - entity.time) / 60000}min old), no notify")
+        } else {
+            notifyMessage(entity)
+        }
         pruneOld()
     }
 
@@ -211,6 +215,13 @@ class PingService : Service() {
             )
             .build()
         try {
+            // POST_NOTIFICATIONS 被拒时 notify() 不抛异常而是静默丢弃，这里显式记录
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                AppLog.log("NOTIF", "!! POST_NOTIFICATIONS not granted, system will drop this")
+            }
             AppLog.log("NOTIF", "post ${if (alert) "alert" else "status"}: $title")
             getSystemService(NotificationManager::class.java).notify(m.id.hashCode(), n)
         } catch (e: SecurityException) {
