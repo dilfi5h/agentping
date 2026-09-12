@@ -2,6 +2,7 @@ name: Build & Release APK
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -45,7 +46,16 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk \
              AgentPing-${{ github.ref_name }}.apk
 
+      # main 分支推送：只出 Actions artifact（验证用），不动 release / 版本号
+      - name: Upload build artifact
+        if: !startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentPing-main-${{ github.sha }}
+          path: AgentPing-${{ github.ref_name }}.apk
+
       - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: AgentPing-${{ github.ref_name }}
