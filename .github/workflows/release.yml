@@ -29,10 +29,11 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk \
              AgentPing-${{ github.ref_name }}-debug.apk
 
-      - name: Create temporary verify release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           name: AgentPing-${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
-          prerelease: true
+          # verifyN tag 挂临时 prerelease，验收后删；正式 tag 出正式 release
+          prerelease: ${{ contains(github.ref_name, 'verify') }}
           files: AgentPing-${{ github.ref_name }}-debug.apk
