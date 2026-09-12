@@ -90,7 +90,11 @@ class MainActivity : ComponentActivity() {
                     onRefresh = { PingService.refresh(this) },
                     onDelete = { id ->
                         lifecycleScope.launch {
-                            AppDatabase.get(this@MainActivity).dao().delete(id)
+                            val db = AppDatabase.get(this@MainActivity)
+                            db.deletedDao().insert(
+                                io.dilfi5h.agentping.data.DeletedId(id, System.currentTimeMillis())
+                            )
+                            db.dao().delete(id)
                         }
                     },
                     modifier = Modifier.padding(pad),

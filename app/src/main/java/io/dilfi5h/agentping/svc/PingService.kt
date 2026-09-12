@@ -128,6 +128,10 @@ class PingService : Service() {
             dur = payload?.dur,
         )
         if (entity.id.isBlank()) { AppLog.log("DB", "skip blank id"); return }
+        if (db.deletedDao().exists(entity.id)) {
+            AppLog.log("DB", "tombstoned id=${entity.id}, skip (user deleted)")
+            return
+        }
         val rowId = db.dao().insert(entity) // ntfy id 幂等，重复消息 IGNORE 返回 -1
         if (rowId == -1L) {
             AppLog.log("DB", "dup id=${entity.id}")
@@ -141,6 +145,7 @@ class PingService : Service() {
     private suspend fun pruneOld() {
         // cache-duration 12h，本地历史略长：留 3 天
         db.dao().prune(System.currentTimeMillis() - 3 * 24 * 3600_000L)
+        db.deletedDao().prune(System.currentTimeMillis() - 2 * 24 * 3600_000L)
     }
 
     // ---- 通知 ----

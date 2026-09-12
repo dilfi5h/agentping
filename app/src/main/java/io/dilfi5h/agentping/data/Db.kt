@@ -55,9 +55,30 @@ interface MessageDao {
     suspend fun prune(before: Long)
 }
 
-@Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+/** 已删除消息的墓碑：服务器缓存回放（since=12h 刷新）时跳过这些 id，避免删除复活的。 */
+@Entity(tableName = "deleted_ids")
+data class DeletedId(
+    @PrimaryKey val id: String,
+    val deletedAt: Long,
+)
+
+@Dao
+interface DeletedDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(d: DeletedId)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM deleted_ids WHERE id = :id)")
+    suspend fun exists(id: String): Boolean
+
+    /** ntfy 缓存 12h，墓碑留 2 天足够覆盖任何回放窗口。 */
+    @Query("DELETE FROM deleted_ids WHERE deletedAt < :before")
+    suspend fun prune(before: Long)
+}
+
+@Database(entities = [MessageEntity::class, DeletedId::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): MessageDao
+    abstract fun deletedDao(): DeletedDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
