@@ -3,6 +3,7 @@ package io.dilfi5h.agentping.svc
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
@@ -12,6 +13,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import io.dilfi5h.agentping.MainActivity
 import io.dilfi5h.agentping.R
@@ -67,6 +69,20 @@ class PingService : Service() {
     }
 
     override fun onBind(intent: Intent?) = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 用户划掉任务卡时，部分 ROM 会连前台服务一起杀；1 秒后拉起重建
+        AppLog.log("SVC", "onTaskRemoved -> scheduling restart")
+        val restart = Intent(applicationContext, PingService::class.java)
+        val pi = PendingIntent.getForegroundService(
+            applicationContext, 1, restart,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        getSystemService(AlarmManager::class.java).setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 1000, pi
+        )
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         AppLog.log("SVC", "onDestroy")

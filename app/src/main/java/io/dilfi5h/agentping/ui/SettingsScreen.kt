@@ -1,5 +1,8 @@
 package io.dilfi5h.agentping.ui
 
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -108,6 +112,32 @@ fun SettingsScreen(
 
         OutlinedButton(onClick = onRestartService, modifier = Modifier.fillMaxWidth()) {
             Text("强制重连")
+        }
+
+        // 后台存活：电池优化白名单（国产 ROM 杀后台的主因）
+        val ctx = LocalContext.current
+        val pm = ctx.getSystemService(PowerManager::class.java)
+        val exempt = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+        if (!exempt) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("后台通知可能被系统拦截", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "当前 App 未加入电池优化白名单，熄屏/切后台后连接可能被系统掐断。" +
+                            "点下方按钮申请豁免；部分 ROM 还需在系统设置中允许「自启动」和「后台运行」。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = {
+                        ctx.startActivity(
+                            Intent(
+                                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:${ctx.packageName}")
+                            )
+                        )
+                    }) { Text("申请忽略电池优化") }
+                }
+            }
         }
 
         val clipboard = LocalClipboardManager.current
