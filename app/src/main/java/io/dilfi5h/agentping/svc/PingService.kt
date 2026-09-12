@@ -188,6 +188,11 @@ class PingService : Service() {
     }
 
     private fun notifyMessage(m: MessageEntity) {
+        // 开始运行只进时间线，不发通知（高频且无行动价值）
+        if (m.stateKind == io.dilfi5h.agentping.data.StateKind.STARTED) {
+            AppLog.log("NOTIF", "started -> timeline only, no notification")
+            return
+        }
         val alert = m.stateKind == io.dilfi5h.agentping.data.StateKind.WAITING ||
             m.stateKind == io.dilfi5h.agentping.data.StateKind.FAILED
         val title = m.title ?: "[${m.host ?: "?"}] ${m.agent ?: "shell"} ${m.stateKind.label}"
