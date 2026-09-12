@@ -64,7 +64,7 @@ fun SettingsScreen(
             value = token,
             onValueChange = { token = it },
             label = { Text("Read Token（只读）") },
-            supportingText = { Text("tk_ 开头，仅读权限；App 无发布能力") },
+            supportingText = { Text("tk_ 开头、仅读权限。别填发布 token（那是给服务器钩子用的，填了会 403）") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),

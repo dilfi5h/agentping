@@ -69,7 +69,14 @@ class NtfyStream(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 AppLog.log("WS", "failure opened=$didOpen ${t.javaClass.simpleName}: ${t.message} http=${response?.code}")
-                onState(if (didOpen) "连接中断" else "连接失败（token/网络?）")
+                // 401=token 无效；403=token 有效但没读权限（典型：误填发布 token）
+                onState(
+                    when (response?.code) {
+                        401 -> "token 无效（401），请检查是否粘贴完整"
+                        403 -> "token 无读权限（403）——是不是把发布 token 填进来了？App 只能填 read token"
+                        else -> if (didOpen) "连接中断" else "连接失败（网络?）"
+                    }
+                )
                 done.complete(StreamEnd.Closed(didOpen))
             }
 
