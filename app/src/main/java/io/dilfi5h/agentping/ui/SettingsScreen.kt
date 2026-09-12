@@ -114,20 +114,28 @@ fun SettingsScreen(
             Text("强制重连")
         }
 
-        // 后台存活：电池优化白名单（国产 ROM 杀后台的主因）
+        // 后台保活：电池优化状态常显（豁免与否一目了然）
         val ctx = LocalContext.current
         val pm = ctx.getSystemService(PowerManager::class.java)
         val exempt = pm.isIgnoringBatteryOptimizations(ctx.packageName)
-        if (!exempt) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("后台通知可能被系统拦截", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "当前 App 未加入电池优化白名单，熄屏/切后台后连接可能被系统掐断。" +
-                            "点下方按钮申请豁免；部分 ROM 还需在系统设置中允许「自启动」和「后台运行」。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("后台保活", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (exempt) "✓ 电池优化：已豁免"
+                    else "✗ 电池优化：未豁免（后台连接会被系统掐断）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (exempt) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    "收不到后台通知时依次检查：① 下方按钮豁免电池优化；" +
+                        "② 系统设置里允许「自启动/后台运行」；③ VPN 类 App 把 AgentPing 加入分流排除" +
+                        "（VPN 隧道重连时会带走本 App 的连接）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!exempt) {
                     Button(onClick = {
                         ctx.startActivity(
                             Intent(

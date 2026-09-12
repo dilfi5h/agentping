@@ -179,6 +179,10 @@ class PingService : Service() {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)
+        // 旧渠道 ID 作废：系统对老渠道的"自动静默"降级无法用代码改回，换新 ID 强制重置
+        for (old in listOf("status", "alert", "service")) {
+            nm.deleteNotificationChannel(old)
+        }
         nm.createNotificationChannel(
             NotificationChannel(CH_STATUS, "任务状态", NotificationManager.IMPORTANCE_DEFAULT).apply {
                 setSound(null, null)
@@ -196,6 +200,11 @@ class PingService : Service() {
                 enableVibration(false)
             }
         )
+        for (id in listOf(CH_STATUS, CH_ALERT, CH_SERVICE)) {
+            nm.getNotificationChannel(id)?.let {
+                AppLog.log("NOTIF", "channel $id importance=${it.importance}")
+            }
+        }
     }
 
     private fun notifyMessage(m: MessageEntity) {
@@ -280,9 +289,9 @@ class PingService : Service() {
     )
 
     companion object {
-        const val CH_STATUS = "status"
-        const val CH_ALERT = "alert"
-        const val CH_SERVICE = "service"
+        const val CH_STATUS = "status-v2"
+        const val CH_ALERT = "alert-v2"
+        const val CH_SERVICE = "service-v2"
         const val NOTIF_SERVICE = 1
 
         /** UI 直读的连接状态文本。 */
