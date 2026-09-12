@@ -1,0 +1,38 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # verify 包走 debug 签名；正式 release 才用本地 keystore 签
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             AgentPing-${{ github.ref_name }}-debug.apk
+
+      - name: Create temporary verify release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AgentPing-${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          prerelease: true
+          files: AgentPing-${{ github.ref_name }}-debug.apk

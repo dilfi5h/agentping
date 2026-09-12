@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A signal dot with expanding arcs, on the dark navy background -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,58 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0"
+        android:fillColor="#4ADE80" />
+    <path
+        android:pathData="M43,47 a15,15 0 0,1 22,0"
+        android:strokeWidth="4"
+        android:strokeColor="#4ADE80"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M35,39 a25,25 0 0,1 38,0"
+        android:strokeWidth="4"
+        android:strokeColor="#4ADE80"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:fillAlpha="0.7" />
+    <path
+        android:pathData="M27,31 a35,35 0 0,1 54,0"
+        android:strokeWidth="4"
+        android:strokeColor="#4ADE80"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:fillAlpha="0.4" />
+</vector>
