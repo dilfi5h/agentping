@@ -27,11 +27,24 @@ class NtfyStream(
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS) // WS 长连接，靠 ntfy 30s keepalive 保活
-        .pingInterval(45, TimeUnit.SECONDS)
+        .pingInterval(20, TimeUnit.SECONDS) // VPN 掐断 socket 常无 RST/FIN，ping 是唯一探测手段，20s 尽快发现黑连接
         .build()
 
+    /** 当前连接是否为历史回放（重装首连/下拉刷新 12h）：true 时 onFrame 只进时间线不通知。 */
+    @Volatile
+    var backfillMode: Boolean = false
+        private set
+
+    /** 连接打开时刻的服务器时间（毫秒，来自握手响应 Date 头，0=未知）。
+     *  发布时间早于它的消息属于断线补回，晚于它的是实时消息——用服务器时钟对齐，不受本机时钟偏移影响。 */
+    @Volatile
+    var openServerTimeMillis: Long = 0L
+        private set
+
     /** 打开订阅并挂起直到连接失败/关闭。message 帧在 scope 里异步回调 onFrame。 */
-    suspend fun connectOnce(settings: PingSettings, since: String?): StreamEnd {
+    suspend fun connectOnce(settings: PingSettings, since: String?, backfill: Boolean): StreamEnd {
+        backfillMode = backfill
+        openServerTimeMillis = 0L
         val done = CompletableDeferred<StreamEnd>()
         var didOpen = false
 
@@ -47,7 +60,13 @@ class NtfyStream(
         val ws = client.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 didOpen = true
-                AppLog.log("WS", "open http=${response.code}")
+                openServerTimeMillis = response.headers["Date"]?.let {
+                    runCatching {
+                        java.time.ZonedDateTime.parse(it, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                            .toInstant().toEpochMilli()
+                    }.getOrDefault(0L)
+                } ?: 0L
+                AppLog.log("WS", "open http=${response.code} serverTime=$openServerTimeMillis")
                 onState("已连接")
             }
 
@@ -64,7 +83,14 @@ class NtfyStream(
                 }
                 if (frame.event != "message") return // keepalive 等忽略
                 AppLog.log("WS", "msg id=${frame.id} title=${frame.title?.take(60)}")
-                scope.launch { onFrame(frame) }
+                scope.launch {
+                    try {
+                        onFrame(frame)
+                    } catch (e: Exception) {
+                        // 单条消息处理异常不能带崩协程根（否则整个进程退出，通知全断）
+                        AppLog.log("WS", "onFrame error ${e.javaClass.simpleName}: ${e.message}")
+                    }
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

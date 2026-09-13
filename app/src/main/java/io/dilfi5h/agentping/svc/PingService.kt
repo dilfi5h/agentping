@@ -45,6 +45,8 @@ class PingService : Service() {
     private val kick = MutableStateFlow(0)
     private var loopJob: kotlinx.coroutines.Job? = null
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    /** 当前连接（续传/实时模式）内已逐条通知的消息数，超出部分进摘要。 */
+    private val resumeCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onCreate() {
         super.onCreate()
@@ -119,11 +121,15 @@ class PingService : Service() {
             val forced = sinceOverride.value
             if (forced != null) sinceOverride.value = null
             val since = forced ?: db.dao().lastId() ?: SINCE_BACKFILL
-            AppLog.log("LOOP", "connecting since=$since backoff=${backoff}ms")
-            val opened = stream.connectOnce(cfg, since).let {
+            // 回放模式 = 重装首连/下拉刷新的 12h 历史回放，只进时间线不通知；
+            // 断线续传（lastId）补回的是断连期间的真消息，必须照常通知
+            val backfill = since == SINCE_BACKFILL
+            resumeCount.set(0)
+            AppLog.log("LOOP", "connecting since=$since backfill=$backfill backoff=${backoff}ms")
+            val opened = stream.connectOnce(cfg, since, backfill).let {
                 it is io.dilfi5h.agentping.net.StreamEnd.Closed && it.opened
             }
-            AppLog.log("LOOP", "ended opened=$opened")
+            AppLog.log("LOOP", "ended opened=$opened net=${netState()}")
             if (opened) { backoff = 1000L; continue }
             updateServiceNotification()
             // 退避等待；期间网络恢复（kick 计数变化）则立即重试且不累加退避
@@ -160,11 +166,21 @@ class PingService : Service() {
             AppLog.log("DB", "dup id=${entity.id}")
             return
         }
-        // 回放/补拉的历史消息（重装首连、下拉刷新）只进时间线，不发通知
-        if (System.currentTimeMillis() - entity.time > 5 * 60_000L) {
-            AppLog.log("NOTIF", "backfill id=${entity.id} (${(System.currentTimeMillis() - entity.time) / 60000}min old), no notify")
-        } else {
+        // 回放（重装首连/下拉刷新）只进时间线；断线续传照常通知，超出上限的合并为摘要防洪水；
+        // 实时消息（连接打开后发布，按服务器 Date 头对齐）不受上限约束
+        if (stream.backfillMode) {
+            AppLog.log("NOTIF", "backfill id=${entity.id}, timeline only (no notify)")
+        } else if (entity.stateKind == io.dilfi5h.agentping.data.StateKind.STARTED) {
+            notifyMessage(entity) // started 高频无行动价值，内部直接转时间线
+        } else if (entity.time >= stream.openServerTimeMillis) {
             notifyMessage(entity)
+        } else {
+            val n = resumeCount.incrementAndGet()
+            if (n <= RESUME_NOTIFY_CAP) {
+                notifyMessage(entity)
+            } else {
+                notifySummary(entity, n - RESUME_NOTIFY_CAP)
+            }
         }
         pruneOld()
     }
@@ -246,6 +262,24 @@ class PingService : Service() {
         }
     }
 
+    private fun notifySummary(m: MessageEntity, extra: Int) {
+        // 断线时间长时补回消息可能上百条，逐条通知会再次触发系统对渠道的"自动静默"降级；
+        // 超出上限的合并到一条摘要里，随每条更早消息滚动更新计数
+        val title = m.title ?: "[${m.host ?: "?"}] ${m.agent ?: "shell"} ${m.stateKind.label}"
+        val text = listOfNotNull(m.task, m.detail).joinToString("\n").ifBlank { m.raw ?: "" }
+        val n = NotificationCompat.Builder(this, CH_ALERT)
+            .setSmallIcon(R.drawable.ic_stat_ping)
+            .setContentTitle("AgentPing 漏掉的消息")
+            .setContentText("最新：$title（等 $extra 条更早消息，点击打开查看）")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setContentIntent(mainIntent())
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .build()
+        AppLog.log("NOTIF", "post summary: extra=$extra latest=$title")
+        getSystemService(NotificationManager::class.java).notify(NOTIF_SUMMARY, n)
+    }
+
     private fun updateServiceNotification() {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_SERVICE, buildServiceNotification())
@@ -283,6 +317,18 @@ class PingService : Service() {
         )
     }
 
+    /** 活跃网络画像（vpn/wifi/cell），连接失败时与 VPN 重连时间点对照用。 */
+    private fun netState(): String {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
+        val t = buildList {
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cell")
+        }
+        return t.joinToString("+").ifBlank { "other" }
+    }
+
     private fun mainIntent() = PendingIntent.getActivity(
         this, 0, Intent(this, MainActivity::class.java),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -293,6 +339,10 @@ class PingService : Service() {
         const val CH_ALERT = "alert-v2"
         const val CH_SERVICE = "service-v2"
         const val NOTIF_SERVICE = 1
+        const val NOTIF_SUMMARY = 3
+
+        /** 断线续传单次连接内逐条通知的上限，超出部分合并摘要。 */
+        const val RESUME_NOTIFY_CAP = 10
 
         /** UI 直读的连接状态文本。 */
         val connectionState = MutableStateFlow("未连接")
