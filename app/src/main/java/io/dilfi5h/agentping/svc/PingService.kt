@@ -195,8 +195,9 @@ class PingService : Service() {
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)
-        // 旧渠道 ID 作废：系统对老渠道的"自动静默"降级无法用代码改回，换新 ID 强制重置
-        for (old in listOf("status", "alert", "service")) {
+        // 旧渠道 ID 作废：系统"自动静默"降级无法用代码改回，换新 ID 强制重置。
+        // -v2 也被 09-12 的测试灌水重新触发了降级，升级到 -v3；续传 10 条上限+摘要防再次触发
+        for (old in listOf("status", "alert", "service", "status-v2", "alert-v2", "service-v2")) {
             nm.deleteNotificationChannel(old)
         }
         nm.createNotificationChannel(
@@ -255,7 +256,11 @@ class PingService : Service() {
                 AppLog.log("NOTIF", "!! POST_NOTIFICATIONS not granted, system will drop this")
             }
             AppLog.log("NOTIF", "post ${if (alert) "alert" else "status"}: $title")
-            getSystemService(NotificationManager::class.java).notify(m.id.hashCode(), n)
+            val nm = getSystemService(NotificationManager::class.java)
+            // 创建时读的 importance 不可信（系统自动静默后可能仍返回原值），发通知时再读一次
+            val imp = nm.getNotificationChannel(if (alert) CH_ALERT else CH_STATUS)?.importance ?: -1
+            AppLog.log("NOTIF", "channel ${if (alert) CH_ALERT else CH_STATUS} importance=$imp")
+            nm.notify(m.id.hashCode(), n)
         } catch (e: SecurityException) {
             AppLog.log("NOTIF", "no permission: ${e.message}")
             // POST_NOTIFICATIONS 未授予：消息仍在时间线里
@@ -277,7 +282,9 @@ class PingService : Service() {
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .build()
         AppLog.log("NOTIF", "post summary: extra=$extra latest=$title")
-        getSystemService(NotificationManager::class.java).notify(NOTIF_SUMMARY, n)
+        val nm = getSystemService(NotificationManager::class.java)
+        AppLog.log("NOTIF", "channel $CH_ALERT importance=${nm.getNotificationChannel(CH_ALERT)?.importance ?: -1}")
+        nm.notify(NOTIF_SUMMARY, n)
     }
 
     private fun updateServiceNotification() {
@@ -335,9 +342,9 @@ class PingService : Service() {
     )
 
     companion object {
-        const val CH_STATUS = "status-v2"
-        const val CH_ALERT = "alert-v2"
-        const val CH_SERVICE = "service-v2"
+        const val CH_STATUS = "status-v3"
+        const val CH_ALERT = "alert-v3"
+        const val CH_SERVICE = "service-v3"
         const val NOTIF_SERVICE = 1
         const val NOTIF_SUMMARY = 3
 
