@@ -55,6 +55,10 @@ jobs:
           gh release create dev --repo dilfi5h/agentping --title "AgentPing dev" \
             --notes "main 分支最新构建（版本号未变更，验证用）" --prerelease AgentPing-dev.apk
 
+      - name: Rename APK
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cp app/build/outputs/apk/release/app-release.apk AgentPing-${{ github.ref_name }}.apk
+
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
