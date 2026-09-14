@@ -79,7 +79,7 @@ pi 钩子 ✅，zcode/claude 未接）。
 | `v` | int | ✅ | 协议版本，恒为 1。App 收到 v>1 时按能力降级渲染（未知字段一律忽略） |
 | `agent` | string | ✅ | 小写标识：`pi` `zcode` `claude` `codex` `gemini` `opencode` `shell`（L2 包装默认值）或其它自定义串。App 未知 agent 按通用样式渲染 |
 | `host` | string | ✅ | 机器名，reporter 用 `hostname -s` 自动取，可被 `--host` 覆盖 |
-| `state` | string | ✅ | 四选一，小写：`started` / `finished` / `failed` / `waiting`。waiting 是只读快照，无解除事件（本机批准后任务继续跑，waiting 不撤回，后续 finished/failed 自然覆盖时间线） |
+| `state` | string | ✅ | 四选一，小写：`started` / `finished` / `failed` / `waiting`。waiting 是只读快照，无解除事件（本机批准后任务继续跑，waiting 不撤回，后续 finished/failed 自然覆盖时间线）。**`started` 仍为合法 state（钩子可继续传），但 reporter 不发布**（高频无行动价值；App 若偶发收到也只进时间线不弹通知） |
 | `task` | string | ❌ | 任务一句话摘要，建议 ≤80 字符。来源：钩子上下文里能拿到的 prompt 片段/文件名，拿不到就省略 |
 | `detail` | string | ❌ | 补充信息 ≤500 字符：退出码、错误消息、权限请求的命令原文 |
 | `session` | string | ❌ | 会话标识（原样透传，App V1 只显示不解析）。V2 远程操作的寻址钥匙 |
@@ -112,8 +112,8 @@ curl -m 5 -s -o /dev/null \
 
 - **双写总 topic（topic 发现机制）**：reporter 对 `agentping-<host>` 和 `agentping-all` 各发一次 POST。AgentPing App 只订 `agentping-all`，加新服务器 App 零配置；`agentping-<host>` 保留给 ntfy 官方 App 按机订阅/调试
 - 用 HTTP header 携带 title/tags/priority（JSON 发布体也行，二选一，统一用 header + body，body 即载荷 JSON，避免双层转义）
-- **优先级映射**：started=low(2，无声) / finished=default(3) / failed=high(4) / waiting=urgent? 不，waiting=high(4)。urgent(5) 留给 V2 手动测试
-- **tags（ntfy emoji）**：`robot` 固定带；状态附加：started=`arrow_forward`、finished=`white_check_mark`、failed=`x`、waiting=`hourglass_flowing_sand`
+- **优先级映射**：started=**不推**（reporter 对 `started` 直接 exit 0）/ finished=default(3) / failed=high(4) / waiting=high(4)。urgent(5) 留给 V2 手动测试
+- **tags（ntfy emoji）**：`robot` 固定带；状态附加：finished=`white_check_mark`、failed=`x`、waiting=`hourglass_flowing_sand`（started 不发布，无 tag）
 - 超时 5 秒、静默失败——钩子永远不能卡住 agent
 
 ### 3.4 App 订阅协议（ntfy JSON stream）
@@ -139,6 +139,7 @@ agent-notify <state> [选项]
   --dur <ms>
 配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf (KEY=VALUE)
 行为约束: 任何自身错误 → stderr 一行 + exit 0；永不阻塞、永不影响 agent 退出码
+started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POST（统一 choke point，各 agent 钩子不必改）
 ```
 
 ### 3.6 各 agent 钩子接线（M2 范围：pi + zcode + Claude Code）

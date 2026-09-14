@@ -19,4 +19,4 @@ fi
 mkdir -p ~/.pi/agent/extensions
 install -m 644 hooks/pi-extension.js ~/.pi/agent/extensions/agentping.js
 echo "installed: ~/.pi/agent/extensions/agentping.js"
-echo "done. 测试: agent-notify started --task hello"
+echo "done. 测试: agent-notify finished --task hello  （started 合法但不发布）"

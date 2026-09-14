@@ -30,15 +30,17 @@ done
 [ -n "$STATE" ] || { echo "agent-notify: missing state" >&2; exit 0; }
 case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad state '$STATE'" >&2; exit 0 ;; esac
 
+# started 高频无行动价值：CLI/钩子仍可传，合法但不发布（exit 0）
+[ "$STATE" = "started" ] && exit 0
+
 if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
   [ -f /etc/agentping.conf ] && . /etc/agentping.conf
 fi
 [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
 [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
 
-# 优先级/emoji 映射（§3.3）
+# 优先级/emoji 映射（§3.3）；started 已在上方吞掉，此处仅 finished/failed/waiting
 case "$STATE" in
-  started)  PRIO=low;     TAGS="robot,arrow_forward";            LABEL="开始运行" ;;
   finished) PRIO=default; TAGS="robot,white_check_mark";         LABEL="已完成" ;;
   failed)   PRIO=high;    TAGS="robot,x";                        LABEL="失败" ;;
   waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="等待批准" ;;
