@@ -146,7 +146,7 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 
 | agent | 触发机制 | 事件 → 状态映射 |
 |---|---|---|
-| **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段)，`agent_end`(stopReason=error)→failed(detail=错误原文)，`agent_settled`→finished（本 run 已推 failed 则跳过） |
+| **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段；reporter 可能不发布)，缓存本轮 task；`agent_end`(stopReason=error)→failed(task+detail=错误原文)，`agent_settled`→finished(task=本轮 prompt；本 run 已推 failed 则跳过)。**finished/failed 必须带 task**，否则 started 被吞后通知正文只剩 session id |
 | **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用） | `SessionStart`→started, `Stop`→finished, `PostToolUseFailure`→不推(噪音)，`PermissionRequest`→waiting；matcher 注意大小写敏感正则；command 型钩子 timeout 单位是秒 |
 | **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
 | **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
