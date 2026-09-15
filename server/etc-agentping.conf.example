@@ -1,0 +1,7 @@
+# AgentPing reporter config (chmod 600)
+# Linux default path: /etc/agentping.conf
+# Windows/Git Bash path: ~/.agentping.conf
+AGENTPING_URL=https://ntfy.example.com
+AGENTPING_TOKEN=tk_replace_with_publish_token
+# Optional short host label for titles/topics (recommended on Windows)
+# AGENTPING_HOST=win

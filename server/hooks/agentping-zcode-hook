@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# AgentPing ZCode hook wrapper (Windows/Git Bash or Linux with bash). stdin = Claude-compatible JSON.
+# Maps: UserPromptSubmit→started, Stop→finished, PermissionRequest→waiting.
+# Always exit 0; never print JSON to stdout (ZCode validates hook output strictly).
+set -u
+NOTIFY="${AGENTPING_NOTIFY:-$HOME/bin/agent-notify}"
+export PATH="/usr/bin:/mingw64/bin:/bin:$PATH"
+export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
+
+dbg() {
+  [ "${AGENTPING_DEBUG:-}" = "1" ] || return 0
+  mkdir -p "$HOME/.agentping-debug" 2>/dev/null || true
+  printf '%s %s
+' "$(date -Iseconds 2>/dev/null || date)" "$*" >>"$HOME/.agentping-debug/zcode-hook.log" 2>/dev/null || true
+}
+dbg "hook_enter"
+
+json="$(cat || true)"
+[ -n "$json" ] || { dbg "empty_stdin"; exit 0; }
+
+parse() {
+  if command -v python >/dev/null 2>&1; then
+    PYTHONIOENCODING=utf-8 python -c 'import json,sys
+try:
+    sys.stdout.reconfigure(newline="\n")
+except Exception:
+    pass
+raw=sys.stdin.read()
+try:
+    d=json.loads(raw)
+except Exception:
+    sys.exit(0)
+
+def g(*keys, default=""):
+    for k in keys:
+        v=d.get(k)
+        if v is None:
+            continue
+        if isinstance(v, (dict, list)):
+            try:
+                return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+            except Exception:
+                return str(v)
+        s=str(v).strip()
+        if s:
+            return s
+    return default
+
+vals=[
+    g("hook_event_name","hookEventName"),
+    g("session_id","sessionId"),
+    g("prompt"),
+    g("last_assistant_message","responsePreview","responseText"),
+    g("tool_name","toolName"),
+    g("tool_input","toolInput"),
+    g("reason"),
+]
+for item in vals:
+    sys.stdout.write(item.replace("\r"," ").replace("\n"," ") + "\n")
+' <<<"$json"
+    return
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r '
+      (.hook_event_name // .hookEventName // ""),
+      (.session_id // .sessionId // ""),
+      (.prompt // ""),
+      (.last_assistant_message // .responsePreview // .responseText // ""),
+      (.tool_name // .toolName // ""),
+      ((.tool_input // .toolInput // "") | if type=="string" then . else tostring end),
+      (.reason // "")
+    ' 2>/dev/null | tr -d "\r"
+    return
+  fi
+  return 1
+}
+
+mapfile -t F < <(parse) || exit 0
+EVENT=$(printf "%s" "${F[0]:-}" | tr -d "\r")
+SESSION=$(printf "%s" "${F[1]:-}" | tr -d "\r")
+PROMPT=$(printf "%s" "${F[2]:-}" | tr -d "\r")
+RESP=$(printf "%s" "${F[3]:-}" | tr -d "\r")
+TOOL=$(printf "%s" "${F[4]:-}" | tr -d "\r")
+TOOL_INPUT=$(printf "%s" "${F[5]:-}" | tr -d "\r")
+REASON=$(printf "%s" "${F[6]:-}" | tr -d "\r")
+
+[ -n "$EVENT" ] || { dbg "empty_event"; exit 0; }
+
+onespace() { printf "%s" "$1" | tr "\r\n\t" "   " | sed "s/  */ /g; s/^ *//; s/ *$//"; }
+PROMPT=$(onespace "$PROMPT")
+RESP=$(onespace "$RESP")
+TOOL=$(onespace "$TOOL")
+TOOL_INPUT=$(onespace "$TOOL_INPUT")
+REASON=$(onespace "$REASON")
+
+dbg "event=$EVENT session=$SESSION"
+
+case "$EVENT" in
+  UserPromptSubmit|SessionStart)
+    TASK="${PROMPT:-session start}"
+    dbg "send started"
+    "$NOTIFY" started --agent zcode --task "${TASK:0:80}" ${SESSION:+--session "$SESSION"} >/dev/null 2>&1 || true
+    ;;
+  Stop)
+    TASK="$PROMPT"
+    [ -n "$TASK" ] || TASK="$RESP"
+    [ -n "$TASK" ] || TASK="zcode session"
+    dbg "send finished task=${TASK:0:80}"
+    "$NOTIFY" finished --agent zcode --task "${TASK:0:80}" ${SESSION:+--session "$SESSION"} >/dev/null 2>&1 || true
+    ;;
+  PermissionRequest)
+    DETAIL="$TOOL"
+    [ -n "$TOOL_INPUT" ] && DETAIL="${DETAIL:+$DETAIL }${TOOL_INPUT}"
+    [ -n "$REASON" ] && DETAIL="${DETAIL:+$DETAIL | }$REASON"
+    [ -n "$DETAIL" ] || DETAIL="permission requested"
+    TASK="${PROMPT:-permission}"
+    dbg "send waiting"
+    "$NOTIFY" waiting --agent zcode --task "${TASK:0:80}" --detail "${DETAIL:0:500}" ${SESSION:+--session "$SESSION"} >/dev/null 2>&1 || true
+    ;;
+  *)
+    dbg "unhandled_event=$EVENT"
+    ;;
+esac
+exit 0

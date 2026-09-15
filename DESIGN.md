@@ -6,7 +6,7 @@
 
 状态：设计定稿 2026-09-12。进度：M1 服务器 ✅（见 §5）、M3 App MVP ✅（v0.0.1 已发，
 仓库 github.com/dilfi5h/agentping，verify 走 tag→CI→deb 拉取）、M2 进行中（agent-notify ✅ +
-pi 钩子 ✅，zcode/claude 未接）。
+pi 钩子 ✅ + zcode Windows ✅，claude 未接）。
 补充定稿（2026-09-12 开工会）：① topic 发现 = reporter 双写总 topic（见 §3.3/§3.4）；② waiting 是只读快照、无解除事件；③ 钩子路径不带 `dur`（仅 L2 包装提供）；④ 时间线排序一律用 ntfy 帧 `time`，`ts` 仅展示。
 
 ## 1. 目标与非目标
@@ -147,7 +147,7 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 | agent | 触发机制 | 事件 → 状态映射 |
 |---|---|---|
 | **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段；reporter 可能不发布)，缓存本轮 task；`agent_end`(stopReason=error)→failed(task+detail=错误原文)，`agent_settled`→finished(task=本轮 prompt；本 run 已推 failed 则跳过)。**finished/failed 必须带 task**，否则 started 被吞后通知正文只剩 session id |
-| **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用） | `SessionStart`→started, `Stop`→finished, `PostToolUseFailure`→不推(噪音)，`PermissionRequest`→waiting；matcher 注意大小写敏感正则；command 型钩子 timeout 单位是秒 |
+| **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用；Windows 用 `server/hooks/agentping-zcode-hook`，`install-win.sh` 生成可合并 snippet） | 推荐：`UserPromptSubmit`→started（可被吞）, `Stop`→finished（带 task）, `PermissionRequest`→waiting；`PostToolUseFailure`→不推(噪音)。Windows process hook 调 Git Bash；注意 stdin JSON 去 CR |
 | **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
 | **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
 | **OpenCode / Gemini CLI** | plugin / hooks（开工时查当前版本文档） | 同型映射 |
@@ -193,19 +193,26 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 ## 7. 工程与仓库
 
 ```
-agentping/                    ← C:\Users\Administrator\agentping
-├── DESIGN.md                 ← 本文档
-├── docs/protocol.md          ← §3 单独成文（给以后接新 agent 的人看）
+agentping/
+├── DESIGN.md
+├── README.md
 ├── server/
-│   ├── agent-notify          ← bash 脚本（唯一服务器侧程序）
+│   ├── agent-notify              ← Linux reporter（curl）
+│   ├── agent-notify.win          ← Windows/Git Bash reporter 壳
+│   ├── agentping-ntfy-body.py    ← Windows UTF-8 JSON 发布辅助
+│   ├── agent-notify.cmd.example  ← 可选 Win32 启动器示例
 │   ├── etc-agentping.conf.example
-│   ├── ntfy/server.yml + systemd/ntfy.service
-│   ├── hooks/{pi-extension.js, zcode-snippet.json, claude-snippet.json, codex-snippet.toml}
-│   └── install.sh            ← deb 上一键装 ntfy+脚本+钩子
-├── app/                      ← Android 工程（Kotlin+Compose，从零建，不复制 PiPilot 代码）
+│   ├── install.sh                ← Linux：/usr/local/bin + pi 扩展
+│   ├── install-win.sh            ← Windows：~/bin + zcode hook 文件
+│   └── hooks/
+│       ├── pi-extension.js
+│       ├── agentping-zcode-hook
+│       └── zcode-snippet.json    ← 占位 snippet；claude/codex 延后
+├── app/
 └── .github/workflows/release.yml
 ```
 
+说明：ntfy `server.yml` / systemd 单元、`docs/protocol.md`、claude/codex snippet 仍可后续补；Windows 与 Linux **两套 install、两份 reporter**，不靠单脚本自动混装。
 - 独立 GitHub 仓库（新建，public，同 dilfi5h 账号）
 - 构建：JDK 17 + AGP 8.7.x + Compose BOM，本地 Gradle 8.9 直调（同 PiPilot 环境）；CI 沿用 setup-java/gradle + actions 模板
 - 签名：**独立新 keystore**（不与 PiPilot 共用——两个 app 两个身份），开工生成，上传 GH Secrets

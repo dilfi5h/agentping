@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "enabled": true,
+    "timeoutMs": 60000,
+    "maxOutputBytes": 32768,
+    "events": {
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+              "args": [
+                "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
+              ],
+              "timeoutMs": 8000,
+              "statusMessage": "AgentPing notify"
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+              "args": [
+                "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
+              ],
+              "timeoutMs": 8000,
+              "statusMessage": "AgentPing notify"
+            }
+          ]
+        }
+      ],
+      "PermissionRequest": [
+        {
+          "hooks": [
+            {
+              "type": "process",
+              "command": "C:\\Program Files\\Git\\bin\\bash.exe",
+              "args": [
+                "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
+              ],
+              "timeoutMs": 8000,
+              "statusMessage": "AgentPing notify"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -7,12 +7,16 @@
 #   --detail <text>  补充（≤500 字符）
 #   --session <id>
 #   --dur <ms>
-# 配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf
+# 配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf > ~/.agentping.conf
 # 行为约束: 任何自身错误 → stderr 一行 + exit 0；永不阻塞、永不影响 agent 退出码
 
 STATE="${1:-}"; shift 2>/dev/null || true
 AGENT="shell"
-HOST="${AGENTPING_HOST:-$(hostname -s 2>/dev/null || echo unknown)}"
+HOST="${AGENTPING_HOST:-}"
+if [ -z "$HOST" ]; then HOST=$(hostname -s 2>/dev/null || true); fi
+if [ -z "$HOST" ]; then HOST=$(hostname 2>/dev/null || true); fi
+if [ -z "$HOST" ]; then HOST="${COMPUTERNAME:-unknown}"; fi
+HOST="${HOST%%.*}"
 TASK=""; DETAIL=""; SESSION=""; DUR=""
 
 while [ $# -gt 0 ]; do
@@ -34,7 +38,11 @@ case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad 
 [ "$STATE" = "started" ] && exit 0
 
 if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
-  [ -f /etc/agentping.conf ] && . /etc/agentping.conf
+  if [ -f /etc/agentping.conf ]; then
+    . /etc/agentping.conf
+  elif [ -f "$HOME/.agentping.conf" ]; then
+    . "$HOME/.agentping.conf"
+  fi
 fi
 [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
 [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
