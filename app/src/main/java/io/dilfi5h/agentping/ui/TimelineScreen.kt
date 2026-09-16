@@ -2,6 +2,9 @@ package io.dilfi5h.agentping.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +15,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,6 +28,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material.icons.Icons
@@ -35,6 +43,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -70,6 +80,7 @@ fun TimelineScreen(
     modifier: Modifier = Modifier,
 ) {
     var refreshing by remember { mutableStateOf(false) }
+    var detailOf by remember { mutableStateOf<MessageEntity?>(null) }
     // 重连完成（状态回到已连接）即收起刷新指示器
     LaunchedEffect(connectionState) {
         if (connectionState == "已连接") refreshing = false
@@ -97,16 +108,21 @@ fun TimelineScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(messages, key = { it.id }) { m ->
-                    SwipeDeleteCard(m, onDelete)
+                    SwipeDeleteCard(m, onDelete, onOpen = { detailOf = m })
                 }
             }
         }
     }
+    detailOf?.let { MessageDetailSheet(it) { detailOf = null } }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeDeleteCard(m: MessageEntity, onDelete: (String) -> Unit) {
+private fun SwipeDeleteCard(
+    m: MessageEntity,
+    onDelete: (String) -> Unit,
+    onOpen: () -> Unit,
+) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
@@ -134,56 +150,50 @@ private fun SwipeDeleteCard(m: MessageEntity, onDelete: (String) -> Unit) {
             }
         },
     ) {
-        MessageCard(m)
+        MessageCard(m, onOpen)
     }
 }
 
 @Composable
-private fun MessageCard(m: MessageEntity) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen() },
+    ) {
         Column(Modifier.padding(12.dp)) {
-            // 左侧三要素（可截断） + 右侧时间徽章（独占，永不压缩）
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 三要素整体作为一个 weight 子项：Compose 先测非加权子项（时间徽章），
-                // 这里拿到的是剩余宽度，空间不足时在内部截断而不是挤掉徽章。
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // host / agent 用 fill = false 的 weight：不被拉伸，空间不足时按份额 ellipsis
+            // 头部两行：第 1 行 host + 时间徽章；第 2 行 agent · 状态，避免三者挤在一行
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
                     Text(
                         m.host ?: "?",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        softWrap = false,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
                     )
-                    Text("  ·  ", style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 1)
-                    Text(
-                        m.agent ?: "shell",
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text("  ·  ", style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        maxLines = 1)
-                    // 状态词短且语义重要：非加权，优先保证完整显示
-                    Text(
-                        m.stateKind.label,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = stateColor(m.stateKind),
-                        maxLines = 1,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            m.agent ?: "shell",
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        Text("  ·  ", style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1)
+                        Text(
+                            m.stateKind.label,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = stateColor(m.stateKind),
+                            maxLines = 1,
+                        )
+                    }
                 }
-                // 外层 Row 里唯一的非加权子项：先按 intrinsic 宽度测量，永不被左侧挤到零宽
+                Spacer(Modifier.width(8.dp))
+                // 时间徽章：独占宽度，永不压缩
                 Surface(shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(
@@ -217,4 +227,84 @@ private fun MessageCard(m: MessageEntity) {
             )
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageDetailSheet(m: MessageEntity, onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val clipboard = LocalClipboardManager.current
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    m.stateKind.label,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = stateColor(m.stateKind),
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    absTime(m.time),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            DetailField("主机", m.host ?: "-")
+            DetailField("Agent", m.agent ?: "-")
+            DetailField("状态", "${m.stateKind.label}（raw: ${m.state ?: "-"}）")
+            DetailField("任务", m.task?.takeIf { it.isNotBlank() } ?: "-")
+            DetailField("详情", m.detail?.takeIf { it.isNotBlank() } ?: "-", mono = true)
+            DetailField("会话", m.session ?: "-")
+            DetailField("Topic", m.topic)
+            DetailField("原始消息", m.raw ?: "-", mono = true)
+
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(m.detailPlainText()))
+                    onDismiss()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("复制全部并关闭") }
+        }
+    }
+}
+
+@Composable
+private fun DetailField(label: String, value: String, mono: Boolean = false) {
+    Column {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SelectionContainer {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = if (mono) FontFamily.Monospace else null,
+            )
+        }
+    }
+}
+
+/** 详情页「复制全部」用的纯文本。 */
+private fun MessageEntity.detailPlainText(): String = buildString {
+    appendLine("状态: ${stateKind.label} (raw: ${state ?: "-"})")
+    appendLine("时间: ${absTime(time)}")
+    appendLine("主机: ${host ?: "-"}")
+    appendLine("Agent: ${agent ?: "-"}")
+    task?.takeIf { it.isNotBlank() }?.let { appendLine("任务: $it") }
+    detail?.takeIf { it.isNotBlank() }?.let { appendLine("详情: $it") }
+    appendLine("会话: ${session ?: "-"}")
+    appendLine("Topic: $topic")
+    raw?.let { appendLine("原始: $it") }
 }
