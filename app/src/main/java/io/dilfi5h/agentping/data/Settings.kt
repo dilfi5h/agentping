@@ -20,9 +20,12 @@ data class PingSettings(
         }
 }
 
-/** 只存 read token；App 全程没有任何发布能力。 */
-class SettingsStore(ctx: Context) {
-    private val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+/**
+ * 进程内单例：Activity / Service / BootReceiver 必须读同一份 flow。
+ * lastNtfyId 是 ntfy 续传游标（与时间线 time 无关），存在同一 prefs 里以免升 schema。
+ */
+class SettingsStore private constructor(app: Context) {
+    private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     private val _flow = MutableStateFlow(load())
     val flow: StateFlow<PingSettings> = _flow
@@ -34,11 +37,41 @@ class SettingsStore(ctx: Context) {
     )
 
     fun save(s: PingSettings) {
+        val stored = s.copy(
+            serverUrl = s.serverUrl.trim(),
+            token = s.token.trim(),
+            topic = s.topic.trim(),
+        )
+        // commit：第一次保存立刻拉起 Service 时，另一条路径读 disk 也能看到 token
         prefs.edit()
-            .putString("serverUrl", s.serverUrl.trim())
-            .putString("token", s.token.trim())
-            .putString("topic", s.topic.trim())
-            .apply()
+            .putString("serverUrl", stored.serverUrl)
+            .putString("token", stored.token)
+            .putString("topic", stored.topic)
+            .commit()
+        _flow.value = stored
+    }
+
+    fun reloadFromDisk() {
         _flow.value = load()
+    }
+
+    fun lastNtfyId(): String? =
+        prefs.getString(KEY_LAST_NTFY_ID, null)?.takeIf { it.isNotBlank() }
+
+    fun rememberNtfyId(id: String) {
+        if (id.isBlank()) return
+        prefs.edit().putString(KEY_LAST_NTFY_ID, id).apply()
+    }
+
+    companion object {
+        private const val KEY_LAST_NTFY_ID = "lastNtfyId"
+
+        @Volatile
+        private var instance: SettingsStore? = null
+
+        fun get(ctx: Context): SettingsStore =
+            instance ?: synchronized(this) {
+                instance ?: SettingsStore(ctx.applicationContext).also { instance = it }
+            }
     }
 }

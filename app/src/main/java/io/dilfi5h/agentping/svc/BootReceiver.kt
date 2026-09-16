@@ -9,7 +9,7 @@ import io.dilfi5h.agentping.data.SettingsStore
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
-        if (SettingsStore(context).flow.value.configured) {
+        if (SettingsStore.get(context).flow.value.configured) {
             context.startForegroundService(Intent(context, PingService::class.java))
         }
     }

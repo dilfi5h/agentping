@@ -21,7 +21,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | zcode 钩子（Linux / Windows / macOS，bash 3.2 兼容） | ✅ |
 | Claude Code 钩子 | 未接 |
 
-当前正式版：[v0.0.6](https://github.com/dilfi5h/agentping/releases/tag/v0.0.6)
+当前正式版：[v0.0.7](https://github.com/dilfi5h/agentping/releases/tag/v0.0.7)
 
 ## 下载 App
 
@@ -61,7 +61,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 
 | 平台 | 命令 | 装到哪里 |
 |---|---|---|
-| Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi 扩展 |
+| Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi / opencode / zcode 钩子（装到 `SUDO_USER` 家目录，不是 root 的 `~`） |
 | Windows（Git Bash） | `./install-win.sh` | `~/bin/agent-notify` + python 发布辅助 + zcode hook 文件 |
 | macOS | `./install-macos.sh` | `~/bin/agent-notify` + zcode hook 文件 |
 
@@ -72,11 +72,12 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 sudo ./install.sh
 ```
 
-会安装：
+会安装（`sudo` 时插件进调用者家目录，不是 `/root`）：
 
 - `/usr/local/bin/agent-notify`（Linux curl 版）
 - `~/.pi/agent/extensions/agentping.js`（若本机用 pi）
 - `~/.config/opencode/plugins/agentping.js`（若本机用 opencode）
+- `~/bin/agentping-zcode-hook` + snippet（与 macOS 相同，需手工合并进 `~/.zcode/cli/config.json`）
 
 若没有 `/etc/agentping.conf`，按提示创建（`chmod 600`）：
 

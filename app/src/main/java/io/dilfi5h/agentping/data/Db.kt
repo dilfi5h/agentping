@@ -33,7 +33,7 @@ data class MessageEntity(
     val ts: Long?,
     val dur: Long?,
 ) {
-    val stateKind: StateKind get() = StateKind.from(state ?: "started")
+    val stateKind: StateKind get() = StateKind.from(state ?: "")
 }
 
 @Dao

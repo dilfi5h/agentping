@@ -13,7 +13,7 @@ data class PingPayload(
     val v: Int = 1,
     val agent: String = "shell",
     val host: String = "",
-    val state: String = "started",
+    val state: String = "",
     val task: String? = null,
     val detail: String? = null,
     val session: String? = null,
@@ -27,11 +27,12 @@ enum class StateKind(val raw: String, val label: String) {
     STARTED("started", "开始运行"),
     FINISHED("finished", "已完成"),
     FAILED("failed", "失败"),
-    WAITING("waiting", "等待批准");
+    WAITING("waiting", "等待批准"),
+    UNKNOWN("unknown", "未知");
 
     companion object {
         fun from(raw: String): StateKind =
-            entries.firstOrNull { it.raw == raw } ?: STARTED
+            entries.firstOrNull { it != UNKNOWN && it.raw == raw } ?: UNKNOWN
     }
 }
 
@@ -55,6 +56,6 @@ fun parseFrame(line: String): NtfyFrame? = runCatching {
 
 /** message 字段按 PingPayload 解析；失败返回 null，调用方降级纯文本。 */
 fun parsePayload(raw: String?): PingPayload? =
-    raw?.takeIf { it.startsWith("{") }?.let {
+    raw?.trim()?.takeIf { it.startsWith("{") }?.let {
         runCatching { frameJson.decodeFromString<PingPayload>(it) }.getOrNull()
     }

@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        settings = SettingsStore(this)
+        settings = SettingsStore.get(this)
         AppLog.log("UI", "MainActivity onCreate configured=${settings.flow.value.configured}")
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
 

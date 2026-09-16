@@ -36,12 +36,15 @@ def main() -> int:
         print("agentping-ntfy-body: missing url/token", file=sys.stderr)
         return 0
 
-    agent = os.environ.get("AP_AGENT", "shell")
-    host = os.environ.get("AP_HOST", "unknown")
-    state = os.environ.get("AP_STATE", "finished")
+    def clip(s: str, n: int) -> str:
+        return (s or "")[:n]
+
+    agent = clip(os.environ.get("AP_AGENT", "shell"), 32)
+    host = clip(os.environ.get("AP_HOST", "unknown"), 64)
+    state = clip(os.environ.get("AP_STATE", "finished"), 16)
     fields = {"v": 1, "agent": agent, "host": host, "state": state}
-    for key, env in (("task", "AP_TASK"), ("detail", "AP_DETAIL"), ("session", "AP_SESSION")):
-        v = os.environ.get(env, "")
+    for key, env, n in (("task", "AP_TASK", 80), ("detail", "AP_DETAIL", 500), ("session", "AP_SESSION", 64)):
+        v = clip(os.environ.get(env, ""), n)
         if v:
             fields[key] = v
     dur = os.environ.get("AP_DUR", "")

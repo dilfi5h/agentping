@@ -54,32 +54,76 @@ case "$STATE" in
   waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="等待批准" ;;
 esac
 
-# JSON 字符串转义 + 截断（\b\f 也不该出现在正常文本里，一并兜住换行）
+# 先截断再编码，避免转义后切在 \" 中间。${s:0:n} 在 bash 3.2 可用。
+clip() { printf '%s' "${1:0:$2}"; }
+HOST=$(clip "$HOST" 64)
+AGENT=$(clip "$AGENT" 32)
+TASK=$(clip "$TASK" 80)
+DETAIL=$(clip "$DETAIL" 500)
+SESSION=$(clip "$SESSION" 64)
+case "$DUR" in
+  ''|*[!0-9]*) DUR="" ;;
+esac
+
+TITLE="[${HOST}] ${AGENT} ${LABEL}"
+
+# 单行 JSON：python / jq 优先；都没有才退回手工转义
 esc() {
-  local s="$1" max="$2"
+  local s="$1"
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\n'/\\n}"
   s="${s//$'\t'/ }"
   s="${s//$'\r'/}"
-  printf '%s' "${s:0:$max}"
+  printf '%s' "$s"
 }
 
-HOST=$(esc "$HOST" 64)
-AGENT=$(esc "$AGENT" 32)
-STATE=$(esc "$STATE" 16)
-TASK=$(esc "$TASK" 80)
-DETAIL=$(esc "$DETAIL" 500)
-SESSION=$(esc "$SESSION" 64)
-TITLE="[${HOST}] ${AGENT} ${LABEL}"
+build_json() {
+  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
+    local py=python3
+    command -v python3 >/dev/null 2>&1 || py=python
+    AP_AGENT="$AGENT" AP_HOST="$HOST" AP_STATE="$STATE" \
+    AP_TASK="$TASK" AP_DETAIL="$DETAIL" AP_SESSION="$SESSION" AP_DUR="$DUR" \
+    "$py" -c '
+import json, os
+f = {"v": 1, "agent": os.environ.get("AP_AGENT", ""), "host": os.environ.get("AP_HOST", ""), "state": os.environ.get("AP_STATE", "")}
+for key, env in (("task", "AP_TASK"), ("detail", "AP_DETAIL"), ("session", "AP_SESSION")):
+    v = os.environ.get(env, "")
+    if v:
+        f[key] = v
+dur = os.environ.get("AP_DUR", "")
+if dur.isdigit():
+    f["dur"] = int(dur)
+print(json.dumps(f, ensure_ascii=False, separators=(",", ":")))
+'
+    return
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc \
+      --arg agent "$AGENT" \
+      --arg host "$HOST" \
+      --arg state "$STATE" \
+      --arg task "$TASK" \
+      --arg detail "$DETAIL" \
+      --arg session "$SESSION" \
+      --arg dur "$DUR" \
+      '{v:1,agent:$agent,host:$host,state:$state}
+       + (if $task == "" then {} else {task:$task} end)
+       + (if $detail == "" then {} else {detail:$detail} end)
+       + (if $session == "" then {} else {session:$session} end)
+       + (if ($dur | test("^[0-9]+$")) then {dur: ($dur | tonumber)} else {} end)'
+    return
+  fi
+  local json="{\"v\":1,\"agent\":\"$(esc "$AGENT")\",\"host\":\"$(esc "$HOST")\",\"state\":\"$(esc "$STATE")\""
+  [ -n "$TASK" ]    && json="${json},\"task\":\"$(esc "$TASK")\""
+  [ -n "$DETAIL" ]  && json="${json},\"detail\":\"$(esc "$DETAIL")\""
+  [ -n "$SESSION" ] && json="${json},\"session\":\"$(esc "$SESSION")\""
+  [ -n "$DUR" ]     && json="${json},\"dur\":${DUR}"
+  printf '%s' "${json}}"
+}
 
-# 单行 JSON 载荷（§3.2）
-JSON="{\"v\":1,\"agent\":\"${AGENT}\",\"host\":\"${HOST}\",\"state\":\"${STATE}\""
-[ -n "$TASK" ]    && JSON="${JSON},\"task\":\"${TASK}\""
-[ -n "$DETAIL" ]  && JSON="${JSON},\"detail\":\"${DETAIL}\""
-[ -n "$SESSION" ] && JSON="${JSON},\"session\":\"${SESSION}\""
-[ -n "$DUR" ]     && JSON="${JSON},\"dur\":${DUR%%[!0-9]*}"
-JSON="${JSON}}"
+JSON=$(build_json) || { echo "agent-notify: json encode failed" >&2; exit 0; }
+[ -n "$JSON" ] || { echo "agent-notify: empty json" >&2; exit 0; }
 
 # 双写总 topic（§3.3）：agentping-<host> 保留给官方 App，agentping-all 给 AgentPing
 for TOPIC in "agentping-${HOST}" "agentping-all"; do

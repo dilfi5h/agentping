@@ -28,7 +28,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
@@ -44,22 +43,18 @@ class PingService : Service() {
 
     private val kick = MutableStateFlow(0)
     private var loopJob: kotlinx.coroutines.Job? = null
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     /** 当前连接（续传/实时模式）内已逐条通知的消息数，超出部分进摘要。 */
     private val resumeCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onCreate() {
         super.onCreate()
         AppLog.log("SVC", "onCreate")
-        settings = SettingsStore(this)
+        settings = SettingsStore.get(this)
         db = AppDatabase.get(this)
         stream = NtfyStream(scope, ::onFrame, ::onConnState)
         createChannels()
         registerNetworkCallback()
-        // VPN 类 App 在后台被杀/重连时会带走所有 socket，重连定时器需要 CPU 活着才有效
-        wakeLock = getSystemService(android.os.PowerManager::class.java)
-            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "AgentPing:ws")
-            .also { it.acquire(24 * 3600_000L) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -68,7 +63,10 @@ class PingService : Service() {
         // 幂等：重复 start 不叠加循环；reload/refresh（配置变更或下拉刷新）取消旧循环重开
         if (intent?.action == ACTION_REFRESH) sinceOverride.value = SINCE_BACKFILL
         val reload = intent?.action == ACTION_RELOAD || intent?.action == ACTION_REFRESH
-        if (reload) loopJob?.cancel()
+        if (reload) {
+            settings.reloadFromDisk()
+            loopJob?.cancel()
+        }
         if (loopJob?.isActive != true) {
             loopJob = scope.launch { runLoop() }
         }
@@ -93,9 +91,9 @@ class PingService : Service() {
 
     override fun onDestroy() {
         AppLog.log("SVC", "onDestroy")
-        wakeLock?.release()
-        wakeLock = null
+        unregisterNetworkCallback()
         scope.cancel()
+        stream.shutdown()
         super.onDestroy()
     }
 
@@ -117,14 +115,15 @@ class PingService : Service() {
         var seenKick = kick.value
         while (scope.isActive) {
             val cfg = settings.flow.first { it.configured }
-            // 优先级：下拉刷新强制回放 > 本地最后 id（断线续传） > 首次连接回放 12h 缓存
+            // 优先级：下拉刷新强制回放 > 已处理的 ntfy 游标（断线续传） > 首次连接回放 12h 缓存
             val forced = sinceOverride.value
             if (forced != null) sinceOverride.value = null
-            val since = forced ?: db.dao().lastId() ?: SINCE_BACKFILL
+            val since = forced ?: settings.lastNtfyId() ?: db.dao().lastId() ?: SINCE_BACKFILL
             // 回放模式 = 重装首连/下拉刷新的 12h 历史回放，只进时间线不通知；
             // 断线续传（lastId）补回的是断连期间的真消息，必须照常通知
             val backfill = since == SINCE_BACKFILL
             resumeCount.set(0)
+            onConnState("连接中")
             AppLog.log("LOOP", "connecting since=$since backfill=$backfill backoff=${backoff}ms")
             val opened = stream.connectOnce(cfg, since, backfill).let {
                 it is io.dilfi5h.agentping.net.StreamEnd.Closed && it.opened
@@ -159,9 +158,11 @@ class PingService : Service() {
         if (entity.id.isBlank()) { AppLog.log("DB", "skip blank id"); return }
         if (db.deletedDao().exists(entity.id)) {
             AppLog.log("DB", "tombstoned id=${entity.id}, skip (user deleted)")
+            settings.rememberNtfyId(entity.id)
             return
         }
         val rowId = db.dao().insert(entity) // ntfy id 幂等，重复消息 IGNORE 返回 -1
+        settings.rememberNtfyId(entity.id)
         if (rowId == -1L) {
             AppLog.log("DB", "dup id=${entity.id}")
             return
@@ -260,7 +261,7 @@ class PingService : Service() {
             // 创建时读的 importance 不可信（系统自动静默后可能仍返回原值），发通知时再读一次
             val imp = nm.getNotificationChannel(if (alert) CH_ALERT else CH_STATUS)?.importance ?: -1
             AppLog.log("NOTIF", "channel ${if (alert) CH_ALERT else CH_STATUS} importance=$imp")
-            nm.notify(m.id.hashCode(), n)
+            nm.notify(NOTIF_TAG_MSG, m.id.hashCode(), n)
         } catch (e: SecurityException) {
             AppLog.log("NOTIF", "no permission: ${e.message}")
             // POST_NOTIFICATIONS 未授予：消息仍在时间线里
@@ -284,7 +285,7 @@ class PingService : Service() {
         AppLog.log("NOTIF", "post summary: extra=$extra latest=$title")
         val nm = getSystemService(NotificationManager::class.java)
         AppLog.log("NOTIF", "channel $CH_ALERT importance=${nm.getNotificationChannel(CH_ALERT)?.importance ?: -1}")
-        nm.notify(NOTIF_SUMMARY, n)
+        nm.notify(NOTIF_TAG_SUMMARY, NOTIF_SUMMARY, n)
     }
 
     private fun updateServiceNotification() {
@@ -312,16 +313,26 @@ class PingService : Service() {
 
     private fun registerNetworkCallback() {
         val cm = getSystemService(ConnectivityManager::class.java)
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                kick.value += 1 // 网络恢复，立即尝试重连
+            }
+        }
+        networkCallback = cb
         cm.registerNetworkCallback(
             NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
                 .build(),
-            object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    kick.value += 1 // 网络恢复，立即尝试重连
-                }
-            }
+            cb,
         )
+    }
+
+    private fun unregisterNetworkCallback() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        runCatching {
+            getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(cb)
+        }
     }
 
     /** 活跃网络画像（vpn/wifi/cell），连接失败时与 VPN 重连时间点对照用。 */
@@ -347,6 +358,9 @@ class PingService : Service() {
         const val CH_SERVICE = "service-v3"
         const val NOTIF_SERVICE = 1
         const val NOTIF_SUMMARY = 3
+        /** 与 FGS/摘要通知分开放，避免 hashCode 撞上 1/3 覆盖常驻通知。 */
+        const val NOTIF_TAG_MSG = "msg"
+        const val NOTIF_TAG_SUMMARY = "summary"
 
         /** 断线续传单次连接内逐条通知的上限，超出部分合并摘要。 */
         const val RESUME_NOTIFY_CAP = 10

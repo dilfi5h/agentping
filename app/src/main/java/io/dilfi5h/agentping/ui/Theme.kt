@@ -15,6 +15,7 @@ val StateStarted = Color(0xFF4C8DFF)
 val StateFinished = Color(0xFF4ADE80)
 val StateFailed = Color(0xFFFF5A5A)
 val StateWaiting = Color(0xFFFFB020)
+val StateUnknown = Color(0xFF9AA0A6)
 
 @Composable
 fun AgentPingTheme(content: @Composable () -> Unit) {

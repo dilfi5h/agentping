@@ -1,7 +1,6 @@
 package io.dilfi5h.agentping.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -62,6 +61,7 @@ fun stateColor(s: StateKind): Color = when (s) {
     StateKind.FINISHED -> StateFinished
     StateKind.FAILED -> StateFailed
     StateKind.WAITING -> StateWaiting
+    StateKind.UNKNOWN -> StateUnknown
 }
 
 /** 卡片时间一律显示东八区绝对时间（多服务器/多时区无歧义）。 */
@@ -81,9 +81,9 @@ fun TimelineScreen(
 ) {
     var refreshing by remember { mutableStateOf(false) }
     var detailOf by remember { mutableStateOf<MessageEntity?>(null) }
-    // 重连完成（状态回到已连接）即收起刷新指示器
+    // 已连接或任何终态（失败/中断/关闭）都收起指示器，避免 401 时空转
     LaunchedEffect(connectionState) {
-        if (connectionState == "已连接") refreshing = false
+        if (connectionState != "连接中" && connectionState.isNotBlank()) refreshing = false
     }
 
     PullToRefreshBox(
@@ -92,13 +92,22 @@ fun TimelineScreen(
         modifier = modifier.fillMaxSize(),
     ) {
         if (messages.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     if (connectionState == "已连接") "还没有消息\n\n下拉刷新可拉取最近 12 小时的历史\n或从服务器发一条测试消息"
                     else "未连接（$connectionState）\n\n请到「设置」检查配置",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                        .height(480.dp),
                 )
             }
         } else {

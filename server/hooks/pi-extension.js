@@ -6,6 +6,17 @@
 //   agent_settled → finished（pi 不再自动续跑时才算完成；若本 run 已推 failed 则跳过；task=本轮 prompt）
 // task 必须挂在 finished/failed 上：started 可能被 reporter 吞掉，否则通知只剩 session id
 
+import { existsSync } from "node:fs"
+
+const HOME = process.env.HOME || ""
+const NOTIFY =
+  [
+    process.env.AGENTPING_NOTIFY,
+    HOME + "/bin/agent-notify",
+    "/usr/local/bin/agent-notify",
+    "/opt/homebrew/bin/agent-notify",
+  ].find((p) => p && existsSync(p)) || "agent-notify"
+
 let failedThisRun = false
 let taskThisRun = ""
 
@@ -19,7 +30,7 @@ export default function (pi) {
     for (const [flag, value] of Object.entries(fields)) {
       if (value) args.push(flag, String(value))
     }
-    pi.exec("agent-notify", args, { timeout: 8000 }).catch(() => {})
+    pi.exec(NOTIFY, args, { timeout: 8000 }).catch(() => {})
   }
 
   pi.on("before_agent_start", async (event, ctx) => {

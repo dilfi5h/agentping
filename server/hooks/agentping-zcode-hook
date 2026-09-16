@@ -4,7 +4,15 @@
 # Always exit 0; never print JSON to stdout (ZCode validates hook output strictly).
 # Portable: no `mapfile` (bash 4+ only); parse backend = jq → python3/python (external parse helper).
 set -u
-NOTIFY="${AGENTPING_NOTIFY:-$HOME/bin/agent-notify}"
+if [ -n "${AGENTPING_NOTIFY:-}" ]; then
+  NOTIFY="$AGENTPING_NOTIFY"
+else
+  NOTIFY=""
+  for _p in "$HOME/bin/agent-notify" /usr/local/bin/agent-notify /opt/homebrew/bin/agent-notify; do
+    if [ -x "$_p" ]; then NOTIFY="$_p"; break; fi
+  done
+  [ -n "$NOTIFY" ] || NOTIFY="agent-notify"
+fi
 SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
 PARSE_PY="${AGENTPING_HOOK_PARSE:-}"
 if [ -z "$PARSE_PY" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/agentping-zcode-hook-parse.py" ]; then
@@ -13,7 +21,8 @@ fi
 if [ -z "$PARSE_PY" ]; then
   PARSE_PY="$HOME/bin/agentping-zcode-hook-parse.py"
 fi
-export PATH="/usr/bin:/mingw64/bin:/bin:$PATH"
+# 追加系统路径，不前置：macOS 上 Homebrew jq/python3 必须排在 Xcode stub 前面
+export PATH="$PATH:/usr/bin:/mingw64/bin:/bin"
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
 

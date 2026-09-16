@@ -120,7 +120,7 @@ curl -m 5 -s -o /dev/null \
 
 - 连接：`WSS ntfy.871116.xyz/agentping-all/ws?since=<last_id>`（**App 只订总 topic `agentping-all`**，见 §3.3 双写机制）
   - 认证走 okhttp 请求头 `Authorization: Bearer tk_read_xxx`（无需 query 参数）
-  - `since` = 本地持久化的最后一条 ntfy message id → 断线重连零丢失，不重不漏
+  - `since` = 本地持久化的最后一条 **已处理** ntfy message id（Settings prefs 游标，与时间线 `time` 脱钩）→ 断线重连零丢失，不重不漏
 - 流格式：换行分隔 JSON，三类帧：
   - `{"event":"open",...}` 连接就绪 → 重置退避计时器
   - `{"event":"keepalive",...}` 服务端 ~30s 心跳 → 忽略（okhttp 自带 ping 兜底 NAT）
@@ -159,7 +159,7 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 连接方式 | 前台服务 + **单条 WebSocket** | 一个连接订阅 `agentping-all`（总 topic，见 §3.3）；ntfy keepalive 保 NAT；无任何 HTTP 轮询。Android 14+ 需声明 FGS type `dataSync` 并在设置页说明用途 |
-| 丢消息保护 | `since=<last_id>` 续传 | 断线不丢、不重；last_id 存 Room，重启后接着收 |
+| 丢消息保护 | `since=<last_id>` 续传 | 断线不丢、不重；last_id 是 ntfy 游标，存在 Settings prefs（与时间线 `time` 脱钩）；升级前无游标时回退 Room 最新 id |
 | 重连策略 | 指数退避 1s→2s→…→60s 封顶；`open` 帧重置；网络可用性回调触发立即重连 | 省电与实时的平衡 |
 | Doze/后台 | 前台服务 notification 常驻（silent、min-importance channel 可关） | Android 对后台网络的限制用 FGS 合法绕开，不用 wake-lock |
 | 开机自启 | `BOOT_COMPLETED` 接收器重启服务，设置页可关 | 服务器重启后手机自动恢复订阅 |
