@@ -73,7 +73,9 @@ fi
 
 if [ "$SKIP_ZCODE" -eq 0 ]; then
   install -m 755 hooks/agentping-zcode-hook "$BIN_DIR/agentping-zcode-hook"
+  install -m 644 hooks/agentping-zcode-hook-parse.py "$BIN_DIR/agentping-zcode-hook-parse.py"
   echo "installed: $BIN_DIR/agentping-zcode-hook"
+  echo "installed: $BIN_DIR/agentping-zcode-hook-parse.py"
 
   # Materialize snippet with this user's home path (forward slashes for bash args)
   HOOK_PATH="$BIN_DIR/agentping-zcode-hook"

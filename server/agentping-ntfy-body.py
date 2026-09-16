@@ -1,13 +1,32 @@
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LABELS = {
     "finished": "已完成",
     "failed": "失败",
     "waiting": "等待批准",
 }
+
+# Keep well under ZCode hook timeoutMs (20s). Two topics in parallel.
+PUBLISH_TIMEOUT_SEC = 2.0
+
+
+def _post(url: str, token: str, data: bytes, topic: str) -> None:
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=PUBLISH_TIMEOUT_SEC) as resp:
+        resp.read()
 
 
 def main() -> int:
@@ -35,6 +54,7 @@ def main() -> int:
     title = f"[{host}] {agent} {LABELS.get(state, state)}"
     host_topic = os.environ.get("AP_TOPIC_HOST", f"agentping-{host}")
 
+    payloads = []
     for topic in (host_topic, "agentping-all"):
         body = {
             "topic": topic,
@@ -45,20 +65,16 @@ def main() -> int:
             "markdown": False,
         }
         data = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                resp.read()
-        except Exception as e:
-            print(f"agentping-ntfy-body: publish {topic} failed: {e}", file=sys.stderr)
+        payloads.append((topic, data))
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        futs = {ex.submit(_post, url, token, data, topic): topic for topic, data in payloads}
+        for fut in as_completed(futs):
+            topic = futs[fut]
+            try:
+                fut.result()
+            except Exception as e:
+                print(f"agentping-ntfy-body: publish {topic} failed: {e}", file=sys.stderr)
     return 0
 
 

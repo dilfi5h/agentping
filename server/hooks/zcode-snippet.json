@@ -13,7 +13,7 @@
               "args": [
                 "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
               ],
-              "timeoutMs": 8000,
+              "timeoutMs": 20000,
               "statusMessage": "AgentPing notify"
             }
           ]
@@ -28,7 +28,7 @@
               "args": [
                 "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
               ],
-              "timeoutMs": 8000,
+              "timeoutMs": 20000,
               "statusMessage": "AgentPing notify"
             }
           ]
@@ -43,7 +43,7 @@
               "args": [
                 "REPLACE_WITH_HOME/bin/agentping-zcode-hook"
               ],
-              "timeoutMs": 8000,
+              "timeoutMs": 20000,
               "statusMessage": "AgentPing notify"
             }
           ]

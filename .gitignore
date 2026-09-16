@@ -6,3 +6,6 @@ app/build/
 keystore.properties
 .idea/
 .zcode/
+
+__pycache__/
+*.pyc
