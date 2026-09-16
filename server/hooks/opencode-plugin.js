@@ -12,8 +12,17 @@
 // chat.message 的 output.parts，不能依赖 message.updated 事件载荷。
 
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 
-const NOTIFY = process.env.AGENTPING_NOTIFY || "agent-notify"
+// 解析 agent-notify：显式环境变量 > ~/bin（macOS 安装路径）> /usr/local/bin（Linux 安装路径）> PATH 兜底
+const HOME = process.env.HOME || ""
+const NOTIFY =
+  [
+    process.env.AGENTPING_NOTIFY,
+    HOME + "/bin/agent-notify",
+    "/usr/local/bin/agent-notify",
+    "/opt/homebrew/bin/agent-notify",
+  ].find((p) => p && existsSync(p)) || "agent-notify"
 const tasks = new Map() // sessionID → 最近一轮用户 prompt
 const failedSent = new Set() // 已推过 failed 的 sessionID
 

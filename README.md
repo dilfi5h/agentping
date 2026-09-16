@@ -124,6 +124,7 @@ AGENTPING_TOKEN=<publish-token>
 - `~/bin/agent-notify`（Linux curl 版，macOS 直接可用）
 - `~/bin/agentping-zcode-hook` + 生成好的 snippet（除非 `--skip-zcode`）
 - `~/bin/agentping-zcode-hook-parse.py`（hook 的 stdin JSON 解析后端；有 `jq` 时不依赖）
+- `~/.config/opencode/plugins/agentping.js`（若本机用 opencode）
 - 若无配置则创建 `~/.agentping.conf` 模板（`chmod 600`）
 
 然后把生成的 `~/bin/agentping-zcode-snippet.json` **手工合并**进 `~/.zcode/cli/config.json`（必须 `hooks.enabled: true`，hook 类型为 `process`：`command=/bin/bash` + 脚本绝对路径），再重开 ZCode 会话。

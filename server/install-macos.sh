@@ -8,6 +8,7 @@
 # ~/.zcode/cli/config.json (prints/writes a ready snippet instead).
 # Reporter uses the Linux curl version (macOS curl handles UTF-8 titles fine,
 # so no agentping-ntfy-body.py helper needed here).
+# Also drops the opencode plugin into ~/.config/opencode/plugins/.
 # System bash 3.2 is enough for the hook; jq OR python3 enables stdin JSON parsing.
 set -e
 cd "$(dirname "$0")"
@@ -48,6 +49,10 @@ mkdir -p "$BIN_DIR"
 
 install -m 755 agent-notify "$BIN_DIR/agent-notify"
 echo "installed: $BIN_DIR/agent-notify"
+
+mkdir -p "$HOME/.config/opencode/plugins"
+install -m 644 hooks/opencode-plugin.js "$HOME/.config/opencode/plugins/agentping.js"
+echo "installed: $HOME/.config/opencode/plugins/agentping.js"
 
 CONF="${HOME}/.agentping.conf"
 if [ ! -f "$CONF" ]; then
