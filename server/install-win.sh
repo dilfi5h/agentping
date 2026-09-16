@@ -71,6 +71,27 @@ else
   fi
 fi
 
+# Git Bash path (/c/Users/...) → Windows path (C:/Users/...) for ZCode process hooks.
+# Do NOT feed /c/... into Windows pathlib: it becomes \\c\\... and FileNotFoundError.
+to_win_path() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p"
+    return
+  fi
+  case "$p" in
+    /[a-zA-Z]/*)
+      local drive rest
+      drive=$(printf '%s' "${p:1:1}" | tr 'a-z' 'A-Z')
+      rest="${p:2}"
+      printf '%s:%s\n' "$drive" "$rest"
+      ;;
+    *)
+      printf '%s\n' "$p"
+      ;;
+  esac
+}
+
 if [ "$SKIP_ZCODE" -eq 0 ]; then
   install -m 755 hooks/agentping-zcode-hook "$BIN_DIR/agentping-zcode-hook"
   install -m 644 hooks/agentping-zcode-hook-parse.py "$BIN_DIR/agentping-zcode-hook-parse.py"
@@ -79,18 +100,14 @@ if [ "$SKIP_ZCODE" -eq 0 ]; then
 
   # Materialize snippet with this user's home path (forward slashes for bash args)
   HOOK_PATH="$BIN_DIR/agentping-zcode-hook"
-  # Git Bash HOME is like /c/Users/foo — convert to Windows-ish path ZCode process hook accepts
-  HOOK_WIN=$(cygpath -m "$HOOK_PATH" 2>/dev/null || python - <<PY
-from pathlib import Path
-print(Path(r'''$HOOK_PATH''').resolve().as_posix().replace('/c/', 'C:/', 1).replace('/d/', 'D:/', 1))
-PY
-)
+  HOOK_WIN=$(to_win_path "$HOOK_PATH")
   BASH_WIN='C:/Program Files/Git/bin/bash.exe'
   if [ ! -f "/c/Program Files/Git/bin/bash.exe" ] && [ ! -f "C:/Program Files/Git/bin/bash.exe" ]; then
     BASH_WIN='bash'
   fi
   SNIPPET_OUT="$BIN_DIR/agentping-zcode-snippet.json"
-  python - <<PY
+  # Python only builds JSON on stdout; bash writes the file so Git Bash paths work.
+  python - <<PY > "$SNIPPET_OUT"
 import json
 from pathlib import Path
 src = Path('hooks/zcode-snippet.json')
@@ -102,10 +119,13 @@ for event, groups in data.get('hooks', {}).get('events', {}).items():
         for h in group.get('hooks', []):
             h['command'] = bash
             h['args'] = [hook]
-out = Path(r'''$SNIPPET_OUT''')
-out.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-print(f'wrote: {out}')
+print(json.dumps(data, ensure_ascii=False, indent=2))
 PY
+  echo "wrote: $SNIPPET_OUT"
+  echo
+  echo "----- merge this into ~/.zcode/cli/config.json (hooks.enabled=true) -----"
+  cat "$SNIPPET_OUT"
+  echo "--------------------------------------------------------------------------"
   echo
   echo "ZCode wiring:"
   echo "  1) Merge hooks from: $SNIPPET_OUT"
