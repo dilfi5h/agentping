@@ -21,7 +21,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | zcode 钩子（Linux / Windows / macOS，bash 3.2 兼容） | ✅ |
 | Claude Code 钩子 | 未接 |
 
-当前正式版：[v0.0.5](https://github.com/dilfi5h/agentping/releases/tag/v0.0.5)
+当前正式版：[v0.0.6](https://github.com/dilfi5h/agentping/releases/tag/v0.0.6)
 
 ## 下载 App
 
