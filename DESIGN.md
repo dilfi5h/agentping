@@ -6,7 +6,7 @@
 
 状态：设计定稿 2026-09-12。进度：M1 服务器 ✅（见 §5）、M3 App MVP ✅（v0.0.1 已发，
 仓库 github.com/dilfi5h/agentping，verify 走 tag→CI→deb 拉取）、M2 进行中（agent-notify ✅ +
-pi 钩子 ✅ + zcode Windows ✅，claude 未接）。
+pi 钩子 ✅ + zcode Windows/macOS ✅，claude 未接）。
 补充定稿（2026-09-12 开工会）：① topic 发现 = reporter 双写总 topic（见 §3.3/§3.4）；② waiting 是只读快照、无解除事件；③ 钩子路径不带 `dur`（仅 L2 包装提供）；④ 时间线排序一律用 ntfy 帧 `time`，`ts` 仅展示。
 
 ## 1. 目标与非目标
@@ -147,7 +147,7 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 | agent | 触发机制 | 事件 → 状态映射 |
 |---|---|---|
 | **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段；reporter 可能不发布)，缓存本轮 task；`agent_end`(stopReason=error)→failed(task+detail=错误原文)，`agent_settled`→finished(task=本轮 prompt；本 run 已推 failed 则跳过)。**finished/failed 必须带 task**，否则 started 被吞后通知正文只剩 session id |
-| **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用；Windows 用 `server/hooks/agentping-zcode-hook`，`install-win.sh` 生成可合并 snippet） | 推荐：`UserPromptSubmit`→started（可被吞）, `Stop`→finished（带 task）, `PermissionRequest`→waiting；`PostToolUseFailure`→不推(噪音)。Windows process hook 调 Git Bash；注意 stdin JSON 去 CR |
+| **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用；Windows 用 `server/hooks/agentping-zcode-hook`，`install-win.sh` 生成可合并 snippet；macOS 同一脚本兼容 bash 3.2（mapfile 改逐行读数组），`install-macos.sh` 生成 snippet：`process` hook，`command=/bin/bash` + 脚本绝对路径） | 推荐：`UserPromptSubmit`→started（可被吞）, `Stop`→finished（带 task）, `PermissionRequest`→waiting；`PostToolUseFailure`→不推(噪音)。Windows process hook 调 Git Bash；注意 stdin JSON 去 CR |
 | **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
 | **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
 | **OpenCode / Gemini CLI** | plugin / hooks（开工时查当前版本文档） | 同型映射 |
@@ -204,15 +204,17 @@ agentping/
 │   ├── etc-agentping.conf.example
 │   ├── install.sh                ← Linux：/usr/local/bin + pi 扩展
 │   ├── install-win.sh            ← Windows：~/bin + zcode hook 文件
+│   ├── install-macos.sh          ← macOS：~/bin + zcode hook 文件（复用 Linux reporter）
 │   └── hooks/
 │       ├── pi-extension.js
 │       ├── agentping-zcode-hook
+│       ├── agentping-zcode-hook-parse.py
 │       └── zcode-snippet.json    ← 占位 snippet；claude/codex 延后
 ├── app/
 └── .github/workflows/release.yml
 ```
 
-说明：ntfy `server.yml` / systemd 单元、`docs/protocol.md`、claude/codex snippet 仍可后续补；Windows 与 Linux **两套 install、两份 reporter**，不靠单脚本自动混装。
+说明：ntfy `server.yml` / systemd 单元、`docs/protocol.md`、claude/codex snippet 仍可后续补；Windows / Linux / macOS **三套 install**（macOS 复用 Linux reporter），不靠单脚本自动混装。
 - 独立 GitHub 仓库（新建，public，同 dilfi5h 账号）
 - 构建：JDK 17 + AGP 8.7.x + Compose BOM，本地 Gradle 8.9 直调（同 PiPilot 环境）；CI 沿用 setup-java/gradle + actions 模板
 - 签名：**独立新 keystore**（不与 PiPilot 共用——两个 app 两个身份），开工生成，上传 GH Secrets

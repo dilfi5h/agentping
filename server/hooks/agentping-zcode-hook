@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# AgentPing ZCode hook. stdin = Claude-compatible JSON.
+# AgentPing ZCode hook wrapper (macOS bash 3.2 / Linux / Windows Git Bash). stdin = Claude-compatible JSON.
 # Maps: UserPromptSubmit→started, Stop→finished, PermissionRequest→waiting.
 # Always exit 0; never print JSON to stdout (ZCode validates hook output strictly).
+# Portable: no `mapfile` (bash 4+ only); parse backend = jq → python3/python (external parse helper).
 set -u
 NOTIFY="${AGENTPING_NOTIFY:-$HOME/bin/agent-notify}"
 SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
@@ -23,24 +24,55 @@ dbg() {
 }
 dbg "hook_enter"
 
-[ -f "$PARSE_PY" ] || { dbg "missing_parse_py"; exit 0; }
-
-# Slurp once, then pipe into parser. Process-subst alone would give python empty stdin.
 json="$(cat || true)"
 [ -n "$json" ] || { dbg "empty_stdin"; exit 0; }
 
-mapfile -t F < <(printf '%s' "$json" | PYTHONIOENCODING=utf-8 python "$PARSE_PY") || exit 0
-EVENT=$(printf '%s' "${F[0]:-}" | tr -d '\r')
-SESSION=$(printf '%s' "${F[1]:-}" | tr -d '\r')
-PROMPT=$(printf '%s' "${F[2]:-}" | tr -d '\r')
-RESP=$(printf '%s' "${F[3]:-}" | tr -d '\r')
-TOOL=$(printf '%s' "${F[4]:-}" | tr -d '\r')
-TOOL_INPUT=$(printf '%s' "${F[5]:-}" | tr -d '\r')
-REASON=$(printf '%s' "${F[6]:-}" | tr -d '\r')
+parse() {
+  if command -v jq >/dev/null 2>&1; then
+    # One line per field; flatten CR/LF inside values; cap long summaries (keep the hook fast).
+    printf '%s' "$json" | jq -r '
+      [
+        ((.hook_event_name // .hookEventName // "") | tostring),
+        ((.session_id // .sessionId // "") | tostring),
+        ((.prompt // "") | tostring),
+        (((.responsePreview // .last_assistant_message // .responseText // "") | tostring | .[0:500])),
+        ((.tool_name // .toolName // "") | tostring),
+        (((.tool_input // .toolInput // "") | if type=="string" then . else tostring end | .[0:500])),
+        (((.reason // "") | tostring | .[0:200]))
+      ]
+      | map(tostring | gsub("\r";" ") | gsub("\n";" "))
+      | .[]
+    ' 2>/dev/null
+    return
+  fi
+  PYBIN=""
+  if command -v python3 >/dev/null 2>&1; then PYBIN=python3
+  elif command -v python >/dev/null 2>&1; then PYBIN=python; fi
+  [ -n "$PYBIN" ] || return 1
+  if [ -n "$PARSE_PY" ] && [ -f "$PARSE_PY" ]; then
+    printf '%s' "$json" | PYTHONIOENCODING=utf-8 "$PYBIN" "$PARSE_PY"
+    return
+  fi
+  dbg "missing_parse_py"
+  return 1
+}
+
+# bash 3.2 兼容：mapfile 是 bash 4+，逐行读入数组代替
+F=()
+while IFS= read -r _l || [ -n "$_l" ]; do
+  F+=("$_l")
+done < <(parse)
+EVENT=$(printf "%s" "${F[0]:-}" | tr -d '\r')
+SESSION=$(printf "%s" "${F[1]:-}" | tr -d '\r')
+PROMPT=$(printf "%s" "${F[2]:-}" | tr -d '\r')
+RESP=$(printf "%s" "${F[3]:-}" | tr -d '\r')
+TOOL=$(printf "%s" "${F[4]:-}" | tr -d '\r')
+TOOL_INPUT=$(printf "%s" "${F[5]:-}" | tr -d '\r')
+REASON=$(printf "%s" "${F[6]:-}" | tr -d '\r')
 
 [ -n "$EVENT" ] || { dbg "empty_event"; exit 0; }
 
-onespace() { printf '%s' "$1" | tr '\r\n\t' '   ' | sed 's/  */ /g; s/^ *//; s/ *$//'; }
+onespace() { printf "%s" "$1" | tr '\r\n\t' '   ' | sed 's/  */ /g; s/^ *//; s/ *$//'; }
 PROMPT=$(onespace "$PROMPT")
 RESP=$(onespace "$RESP")
 TOOL=$(onespace "$TOOL")

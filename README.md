@@ -14,13 +14,13 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | 部分 | 状态 |
 |---|---|
 | ntfy 消息总线 | ✅ |
-| `agent-notify` reporter（Linux / Windows） | ✅ |
+| `agent-notify` reporter（Linux / Windows / macOS） | ✅ |
 | Android App（时间线 / 通知 / 续传） | ✅ |
 | pi 钩子 | ✅ |
-| zcode 钩子（Windows 已验证） | ✅ |
+| zcode 钩子（Linux / Windows / macOS，bash 3.2 兼容） | ✅ |
 | Claude Code 钩子 | 未接 |
 
-当前正式版：[v0.0.4](https://github.com/dilfi5h/agentping/releases/tag/v0.0.4)
+当前正式版：[v0.0.5](https://github.com/dilfi5h/agentping/releases/tag/v0.0.5)
 
 ## 下载 App
 
@@ -62,6 +62,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 |---|---|---|
 | Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi 扩展 |
 | Windows（Git Bash） | `./install-win.sh` | `~/bin/agent-notify` + python 发布辅助 + zcode hook 文件 |
+| macOS | `./install-macos.sh` | `~/bin/agent-notify` + zcode hook 文件 |
 
 ### Linux
 
@@ -100,9 +101,30 @@ AGENTPING_TOKEN=<publish-token>
 - `~/bin/agent-notify`（来自 `agent-notify.win`）
 - `~/bin/agentping-ntfy-body.py`（UTF-8 JSON 发布，避免 Windows curl 中文 Title 乱码）
 - `~/bin/agentping-zcode-hook` + 生成好的 snippet（除非 `--skip-zcode`）
+- `~/bin/agentping-zcode-hook-parse.py`（hook 的 stdin JSON 解析后端；有 `jq` 时不依赖）
 - 若无配置则创建 `~/.agentping.conf` 模板
 
 然后把生成的 `~/bin/agentping-zcode-snippet.json` **手工合并**进 `~/.zcode/cli/config.json`（必须 `hooks.enabled: true`），再重开 ZCode 会话。
+
+### macOS
+
+依赖：系统自带 bash 3.2 即可跑 hook；`jq` 或 `python3` 任一在 PATH 上（hook 解析 stdin JSON 用，依次探测 `jq` → `python3` → `python`，都没有则钩子静默跳过、不影响 agent）。
+
+```bash
+# 在仓库 server/ 目录
+./install-macos.sh
+# 可选：./install-macos.sh --host mac
+# 可选：./install-macos.sh --skip-zcode   # 只装 reporter
+```
+
+会安装：
+
+- `~/bin/agent-notify`（Linux curl 版，macOS 直接可用）
+- `~/bin/agentping-zcode-hook` + 生成好的 snippet（除非 `--skip-zcode`）
+- `~/bin/agentping-zcode-hook-parse.py`（hook 的 stdin JSON 解析后端；有 `jq` 时不依赖）
+- 若无配置则创建 `~/.agentping.conf` 模板（`chmod 600`）
+
+然后把生成的 `~/bin/agentping-zcode-snippet.json` **手工合并**进 `~/.zcode/cli/config.json`（必须 `hooks.enabled: true`，hook 类型为 `process`：`command=/bin/bash` + 脚本绝对路径），再重开 ZCode 会话。
 
 ### 快速自测
 
