@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.dilfi5h.agentping.data.MessageEntity
 import io.dilfi5h.agentping.data.StateKind
@@ -141,34 +142,56 @@ private fun SwipeDeleteCard(m: MessageEntity, onDelete: (String) -> Unit) {
 private fun MessageCard(m: MessageEntity) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            // 三要素：主机 · agent 名 · 动作（状态着色）
+            // 左侧三要素（可截断） + 右侧时间徽章（独占，永不压缩）
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    m.host ?: "?",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text("  ·  ", style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.outline)
-                Text(
-                    m.agent ?: "shell",
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                Text("  ·  ", style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.outline)
-                Text(
-                    m.stateKind.label,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = stateColor(m.stateKind),
-                )
-                Spacer(Modifier.weight(1f))
+                // 三要素整体作为一个 weight 子项：Compose 先测非加权子项（时间徽章），
+                // 这里拿到的是剩余宽度，空间不足时在内部截断而不是挤掉徽章。
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // host / agent 用 fill = false 的 weight：不被拉伸，空间不足时按份额 ellipsis
+                    Text(
+                        m.host ?: "?",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text("  ·  ", style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1)
+                    Text(
+                        m.agent ?: "shell",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Text("  ·  ", style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1)
+                    // 状态词短且语义重要：非加权，优先保证完整显示
+                    Text(
+                        m.stateKind.label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = stateColor(m.stateKind),
+                        maxLines = 1,
+                    )
+                }
+                // 外层 Row 里唯一的非加权子项：先按 intrinsic 宽度测量，永不被左侧挤到零宽
                 Surface(shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(
                         absTime(m.time),
                         Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
