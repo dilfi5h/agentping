@@ -17,6 +17,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | `agent-notify` reporter（Linux / Windows / macOS） | ✅ |
 | Android App（时间线 / 通知 / 续传） | ✅ |
 | pi 钩子 | ✅ |
+| opencode 插件 | ✅ |
 | zcode 钩子（Linux / Windows / macOS，bash 3.2 兼容） | ✅ |
 | Claude Code 钩子 | 未接 |
 
@@ -75,6 +76,7 @@ sudo ./install.sh
 
 - `/usr/local/bin/agent-notify`（Linux curl 版）
 - `~/.pi/agent/extensions/agentping.js`（若本机用 pi）
+- `~/.config/opencode/plugins/agentping.js`（若本机用 opencode）
 
 若没有 `/etc/agentping.conf`，按提示创建（`chmod 600`）：
 
@@ -153,6 +155,7 @@ agent-notify <started|finished|failed|waiting> [选项]
 | agent | 触发 | 映射 |
 |---|---|---|
 | **pi** | `~/.pi/agent/extensions/agentping.js` | `before_agent_start`→started（可被吞）；`agent_settled`→finished（带本轮 task）；错误→failed（task+detail） |
+| **opencode** | `~/.config/opencode/plugins/agentping.js`（全局插件目录） | `chat.message`→缓存本轮 task；`session.status:busy`→started（可被吞）；`session.idle`→finished（带 task）；`session.error`→failed；`permission.ask`→waiting |
 | **zcode** | `~/.zcode/cli/config.json` hooks + `agentping-zcode-hook` | `UserPromptSubmit`→started（可被吞）；`Stop`→finished；`PermissionRequest`→waiting |
 
 pi / zcode 的 `finished` / `failed` **必须带本轮 prompt 摘要**：否则在 `started` 不发布时，通知正文只剩 `session_…`。

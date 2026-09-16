@@ -2,7 +2,8 @@
 # AgentPing Linux 服务器侧一键安装（reporter 部分；ntfy 服务端见 DESIGN.md §5）
 # 用法: sudo ./install.sh
 # 做的事: 装 agent-notify → /usr/local/bin；/etc/agentping.conf 不存在则提示手工填 token；
-#         部署 pi 扩展 → ~/.pi/agent/extensions/agentping.js
+#         部署 pi 扩展 → ~/.pi/agent/extensions/agentping.js；
+#         部署 opencode 插件 → ~/.config/opencode/plugins/agentping.js
 # 主机名覆盖: 在 /etc/agentping.conf 里加 AGENTPING_HOST=<name>（容器等场景）
 #
 # Windows/Git Bash 请用同目录 ./install-win.sh（不要用本脚本）。
@@ -29,4 +30,9 @@ fi
 mkdir -p ~/.pi/agent/extensions
 install -m 644 hooks/pi-extension.js ~/.pi/agent/extensions/agentping.js
 echo "installed: ~/.pi/agent/extensions/agentping.js"
+
+mkdir -p ~/.config/opencode/plugins
+install -m 644 hooks/opencode-plugin.js ~/.config/opencode/plugins/agentping.js
+echo "installed: ~/.config/opencode/plugins/agentping.js"
+
 echo "done. 测试: agent-notify finished --task hello  （started 合法但不发布）"

@@ -149,6 +149,7 @@ started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POS
 | **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段；reporter 可能不发布)，缓存本轮 task；`agent_end`(stopReason=error)→failed(task+detail=错误原文)，`agent_settled`→finished(task=本轮 prompt；本 run 已推 failed 则跳过)。**finished/failed 必须带 task**，否则 started 被吞后通知正文只剩 session id |
 | **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用；Windows 用 `server/hooks/agentping-zcode-hook`，`install-win.sh` 生成可合并 snippet；macOS 同一脚本兼容 bash 3.2（mapfile 改逐行读数组），`install-macos.sh` 生成 snippet：`process` hook，`command=/bin/bash` + 脚本绝对路径） | 推荐：`UserPromptSubmit`→started（可被吞）, `Stop`→finished（带 task）, `PermissionRequest`→waiting；`PostToolUseFailure`→不推(噪音)。Windows process hook 调 Git Bash；注意 stdin JSON 去 CR |
 | **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
+| **opencode** | plugin `~/.config/opencode/plugins/agentping.js`（✅ 2026-09-16 已落地真机验证，v1.18.31；hook：`chat.message`/`event`/`permission.ask`，spawn 调 agent-notify） | `chat.message`→缓存 task（文本在 `output.parts`，**不在** `message.updated` 载荷里）；`session.status:busy`→started（可被吞）；`session.idle`→finished（带 task；failed 已推则跳过）；`session.error`→failed（task+detail）；`permission.ask`→waiting（title+metadata.command） |
 | **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
 | **OpenCode / Gemini CLI** | plugin / hooks（开工时查当前版本文档） | 同型映射 |
 | **其它一切**（L2 兜底） | `agentping run -- <cmd>` | 启动→started；退出码 0→finished(dur)，非 0→failed(dur, detail=stderr 尾部) |
@@ -207,6 +208,7 @@ agentping/
 │   ├── install-macos.sh          ← macOS：~/bin + zcode hook 文件（复用 Linux reporter）
 │   └── hooks/
 │       ├── pi-extension.js
+│       ├── opencode-plugin.js
 │       ├── agentping-zcode-hook
 │       ├── agentping-zcode-hook-parse.py
 │       └── zcode-snippet.json    ← 占位 snippet；claude/codex 延后
