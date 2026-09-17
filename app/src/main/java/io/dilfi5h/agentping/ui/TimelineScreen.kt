@@ -1,5 +1,6 @@
 package io.dilfi5h.agentping.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -22,6 +23,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
@@ -33,6 +35,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -81,48 +84,206 @@ fun TimelineScreen(
 ) {
     var refreshing by remember { mutableStateOf(false) }
     var detailOf by remember { mutableStateOf<MessageEntity?>(null) }
+    var selectedSessionId by remember { mutableStateOf<String?>(null) }
+    val timelineEntries = remember(messages) { aggregateTimeline(messages) }
+    val selectedMessages = remember(messages, selectedSessionId) {
+        selectedSessionId?.let { sessionId ->
+            messages
+                .filter { it.session == sessionId }
+                .sortedWith(compareByDescending<MessageEntity> { it.time }.thenByDescending { it.id })
+        }
+    }
+
     // 已连接或任何终态（失败/中断/关闭）都收起指示器，避免 401 时空转
     LaunchedEffect(connectionState) {
         if (connectionState != "连接中" && connectionState.isNotBlank()) refreshing = false
     }
+    LaunchedEffect(selectedSessionId, selectedMessages?.size) {
+        if (selectedSessionId != null && selectedMessages.isNullOrEmpty()) selectedSessionId = null
+    }
+    BackHandler(enabled = selectedSessionId != null) { selectedSessionId = null }
 
     PullToRefreshBox(
         isRefreshing = refreshing,
         onRefresh = { refreshing = true; onRefresh() },
         modifier = modifier.fillMaxSize(),
     ) {
-        if (messages.isEmpty()) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (connectionState == "已连接") "还没有消息\n\n下拉刷新可拉取最近 12 小时的历史\n或从服务器发一条测试消息"
-                    else "未连接（$connectionState）\n\n请到「设置」检查配置",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp)
-                        .height(480.dp),
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(messages, key = { it.id }) { m ->
-                    SwipeDeleteCard(m, onDelete, onOpen = { detailOf = m })
-                }
-            }
+        when {
+            messages.isEmpty() -> EmptyTimeline(connectionState)
+            selectedSessionId != null && !selectedMessages.isNullOrEmpty() -> SessionTimeline(
+                sessionId = selectedSessionId!!,
+                messages = selectedMessages,
+                onBack = { selectedSessionId = null },
+                onDelete = onDelete,
+                onOpen = { detailOf = it },
+            )
+            else -> AggregatedTimeline(
+                entries = timelineEntries,
+                onOpenSession = { selectedSessionId = it },
+                onDelete = onDelete,
+                onOpenMessage = { detailOf = it },
+            )
         }
     }
     detailOf?.let { MessageDetailSheet(it) { detailOf = null } }
+}
+
+@Composable
+private fun EmptyTimeline(connectionState: String) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (connectionState == "已连接") "还没有消息\n\n下拉刷新可拉取最近 12 小时的历史\n或从服务器发一条测试消息"
+            else "未连接（$connectionState）\n\n请到「设置」检查配置",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .height(480.dp),
+        )
+    }
+}
+
+@Composable
+private fun AggregatedTimeline(
+    entries: List<TimelineEntry>,
+    onOpenSession: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenMessage: (MessageEntity) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(entries, key = { it.stableKey }) { entry ->
+            when (entry) {
+                is TimelineEntry.SessionGroup -> SessionGroupCard(entry, onOpenSession)
+                is TimelineEntry.SingleMessage -> SwipeDeleteCard(
+                    entry.message,
+                    onDelete,
+                    onOpen = { onOpenMessage(entry.message) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SessionTimeline(
+    sessionId: String,
+    messages: List<MessageEntity>,
+    onBack: () -> Unit,
+    onDelete: (String) -> Unit,
+    onOpen: (MessageEntity) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item(key = "session-header") {
+            SessionHeader(sessionId, messages.size, onBack)
+        }
+        items(messages, key = { it.id }) { message ->
+            SwipeDeleteCard(message, onDelete, onOpen = { onOpen(message) })
+        }
+    }
+}
+
+@Composable
+private fun SessionHeader(sessionId: String, count: Int, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        }
+        Column(Modifier.weight(1f)) {
+            Text(
+                sessionId,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "$count 条消息",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SessionGroupCard(group: TimelineEntry.SessionGroup, onOpen: (String) -> Unit) {
+    val latest = group.latest
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpen(group.sessionId) },
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        group.sessionId,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "${group.messages.size} 条消息  ·  ${latest.stateKind.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = stateColor(latest.stateKind),
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        absTime(group.latestTime),
+                        Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "${latest.host ?: "?"}  ·  ${latest.agent ?: "shell"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            latest.task?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
