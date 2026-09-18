@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class TimelineAggregationTest {
     @Test
@@ -145,25 +146,99 @@ class TimelineAggregationTest {
         assertFalse(shouldShowDuration(StateKind.FINISHED, 0))
     }
 
+    @Test
+    fun `waiting and recent finished stay active, older today and earlier split by CST date`() {
+        val now = Instant.parse("2026-04-24T10:00:00+08:00").toEpochMilli()
+        val entries = listOf(
+            TimelineEntry.SingleMessage(message(id = "wait", time = now - 3 * DAY, state = "waiting")),
+            TimelineEntry.SingleMessage(message(id = "recent", time = now - 30 * 60_000L, state = "finished")),
+            TimelineEntry.SingleMessage(message(id = "today", time = now - 5 * 3600_000L, state = "finished")),
+            TimelineEntry.SingleMessage(message(id = "old", time = now - DAY, state = "finished")),
+        )
+        val sections = sectionEntries(entries, nowMs = now)
+        assertEquals(listOf("wait", "recent"), sections.active.map { it.displayedMessage().id })
+        assertEquals(listOf("today"), sections.today.map { it.displayedMessage().id })
+        assertEquals(listOf("old"), sections.earlier.map { it.displayedMessage().id })
+    }
+
+    @Test
+    fun `started is active even when older than the window`() {
+        val now = 1_000_000L
+        val entry = TimelineEntry.SingleMessage(
+            message(id = "start", time = now - 9 * 3600_000L, state = "started"),
+        )
+        assertEquals(TimelineSection.Active, sectionOf(entry, now))
+    }
+
+    @Test
+    fun `host and agent chips match any message in the session, search looks through the session`() {
+        val messages = listOf(
+            message(id = "old-task", time = 100, session = "sess-a", host = "deb", agent = "pi", task = "fix login"),
+            message(id = "latest", time = 300, session = "sess-a", host = "mac", agent = "zcode", task = "ship apk"),
+            message(id = "other", time = 200, session = "sess-b", host = "deb", agent = "pi", task = "rewrite"),
+        )
+        val entries = aggregateTimeline(messages)
+        assertEquals(listOf("deb", "mac"), distinctHosts(messages))
+        assertEquals(listOf("pi", "zcode"), distinctAgents(messages))
+        assertEquals(
+            listOf("sess-a", "sess-b"),
+            filterEntries(entries, TimelineFilter(host = "deb")).map { (it as TimelineEntry.SessionGroup).sessionId },
+        )
+        assertEquals(
+            listOf("sess-a"),
+            filterEntries(entries, TimelineFilter(host = "mac")).map { (it as TimelineEntry.SessionGroup).sessionId },
+        )
+        assertEquals(
+            listOf("sess-a"),
+            filterEntries(entries, TimelineFilter(agent = "zcode")).map { (it as TimelineEntry.SessionGroup).sessionId },
+        )
+        assertEquals(
+            listOf("sess-a"),
+            filterEntries(entries, TimelineFilter(query = "fix login")).map { (it as TimelineEntry.SessionGroup).sessionId },
+        )
+        assertEquals(
+            listOf("sess-b"),
+            filterEntries(entries, TimelineFilter(host = "deb", query = "rewrite"))
+                .map { (it as TimelineEntry.SessionGroup).sessionId },
+        )
+        assertTrue(filterEntries(entries, TimelineFilter(query = "missing")).isEmpty())
+    }
+
+    @Test
+    fun `blank query with no chips leaves the list unchanged`() {
+        val entries = aggregateTimeline(listOf(message(id = "a", time = 1, session = "s")))
+        assertEquals(entries, filterEntries(entries, TimelineFilter()))
+        assertEquals(entries, filterEntries(entries, TimelineFilter(query = "   ")))
+    }
+
     private fun message(
         id: String,
         time: Long,
-        session: String?,
+        session: String? = null,
         ts: Long? = null,
         dur: Long? = null,
+        host: String? = "test-host",
+        agent: String? = "zcode",
+        state: String? = "finished",
+        task: String? = "test task",
+        detail: String? = null,
     ) = MessageEntity(
         id = id,
         time = time,
         topic = "agentping-all",
         title = null,
         raw = null,
-        agent = "zcode",
-        host = "test-host",
-        state = "finished",
-        task = "test task",
-        detail = null,
+        agent = agent,
+        host = host,
+        state = state,
+        task = task,
+        detail = detail,
         session = session,
         ts = ts,
         dur = dur,
     )
+
+    companion object {
+        private const val DAY = 24 * 3600_000L
+    }
 }

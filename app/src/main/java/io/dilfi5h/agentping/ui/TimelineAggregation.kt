@@ -2,6 +2,9 @@ package io.dilfi5h.agentping.ui
 
 import io.dilfi5h.agentping.data.MessageEntity
 import io.dilfi5h.agentping.data.StateKind
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 internal sealed interface TimelineEntry {
     val stableKey: String
@@ -90,3 +93,123 @@ internal fun gapsFromPrevious(messagesChrono: List<MessageEntity>): List<Long?> 
         if (index == 0) null
         else (message.time - messagesChrono[index - 1].time).coerceAtLeast(0L)
     }
+
+/** Card timestamps and "Today" / "Earlier" use UTC+8 so multi-server clocks stay unambiguous. */
+internal val DISPLAY_ZONE: ZoneId = ZoneId.of("Asia/Shanghai")
+
+/** Still "now" if waiting/started, or last activity within this window. */
+internal const val ACTIVE_WINDOW_MS = 2L * 3600_000L
+
+internal data class TimelineFilter(
+    val query: String = "",
+    val host: String? = null,
+    val agent: String? = null,
+) {
+    val hasConstraints: Boolean
+        get() = query.isNotBlank() || host != null || agent != null
+}
+
+internal enum class TimelineSection { Active, Today, Earlier }
+
+internal data class TimelineSections(
+    val active: List<TimelineEntry> = emptyList(),
+    val today: List<TimelineEntry> = emptyList(),
+    val earlier: List<TimelineEntry> = emptyList(),
+) {
+    val isEmpty: Boolean get() = active.isEmpty() && today.isEmpty() && earlier.isEmpty()
+}
+
+internal fun TimelineEntry.displayedMessage(): MessageEntity = when (this) {
+    is TimelineEntry.SessionGroup -> latest
+    is TimelineEntry.SingleMessage -> message
+}
+
+internal fun distinctHosts(messages: List<MessageEntity>): List<String> =
+    distinctField(messages) { it.host }
+
+internal fun distinctAgents(messages: List<MessageEntity>): List<String> =
+    distinctField(messages) { it.agent }
+
+internal fun filterEntries(entries: List<TimelineEntry>, filter: TimelineFilter): List<TimelineEntry> {
+    if (!filter.hasConstraints) return entries
+    val query = filter.query.trim()
+    return entries.filter { entry ->
+        val messages = entry.entryMessages()
+        val hostOk = filter.host == null || messages.any { it.host == filter.host }
+        val agentOk = filter.agent == null || messages.any { it.agent == filter.agent }
+        hostOk && agentOk && (query.isEmpty() || entry.matchesQuery(query))
+    }
+}
+
+internal fun sectionEntries(
+    entries: List<TimelineEntry>,
+    nowMs: Long,
+    zone: ZoneId = DISPLAY_ZONE,
+    activeWindowMs: Long = ACTIVE_WINDOW_MS,
+): TimelineSections {
+    val active = mutableListOf<TimelineEntry>()
+    val today = mutableListOf<TimelineEntry>()
+    val earlier = mutableListOf<TimelineEntry>()
+    val todayDate = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    entries.forEach { entry ->
+        when (sectionOf(entry, nowMs, todayDate, zone, activeWindowMs)) {
+            TimelineSection.Active -> active += entry
+            TimelineSection.Today -> today += entry
+            TimelineSection.Earlier -> earlier += entry
+        }
+    }
+    return TimelineSections(active, today, earlier)
+}
+
+internal fun sectionOf(
+    entry: TimelineEntry,
+    nowMs: Long,
+    zone: ZoneId = DISPLAY_ZONE,
+    activeWindowMs: Long = ACTIVE_WINDOW_MS,
+): TimelineSection {
+    val todayDate = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    return sectionOf(entry, nowMs, todayDate, zone, activeWindowMs)
+}
+
+private fun sectionOf(
+    entry: TimelineEntry,
+    nowMs: Long,
+    todayDate: LocalDate,
+    zone: ZoneId,
+    activeWindowMs: Long,
+): TimelineSection {
+    val latest = entry.displayedMessage()
+    val inProgress = latest.stateKind == StateKind.WAITING || latest.stateKind == StateKind.STARTED
+    val age = nowMs - entry.latestTime
+    if (inProgress || age <= activeWindowMs) return TimelineSection.Active
+    val latestDate = Instant.ofEpochMilli(entry.latestTime).atZone(zone).toLocalDate()
+    return if (latestDate == todayDate) TimelineSection.Today else TimelineSection.Earlier
+}
+
+private fun TimelineEntry.matchesQuery(query: String): Boolean {
+    if (this is TimelineEntry.SessionGroup && sessionId.contains(query, ignoreCase = true)) return true
+    return entryMessages().any { it.matchesQuery(query) }
+}
+
+private fun TimelineEntry.entryMessages(): List<MessageEntity> = when (this) {
+    is TimelineEntry.SessionGroup -> messages
+    is TimelineEntry.SingleMessage -> listOf(message)
+}
+
+private fun MessageEntity.matchesQuery(query: String): Boolean =
+    id.contains(query, ignoreCase = true) ||
+        (title?.contains(query, ignoreCase = true) == true) ||
+        (host?.contains(query, ignoreCase = true) == true) ||
+        (agent?.contains(query, ignoreCase = true) == true) ||
+        (state?.contains(query, ignoreCase = true) == true) ||
+        stateKind.label.contains(query, ignoreCase = true) ||
+        (task?.contains(query, ignoreCase = true) == true) ||
+        (detail?.contains(query, ignoreCase = true) == true) ||
+        (session?.contains(query, ignoreCase = true) == true) ||
+        (raw?.contains(query, ignoreCase = true) == true) ||
+        topic.contains(query, ignoreCase = true)
+
+private fun distinctField(messages: List<MessageEntity>, pick: (MessageEntity) -> String?): List<String> =
+    messages.mapNotNull { pick(it)?.takeIf { value -> value.isNotBlank() } }
+        .distinct()
+        .sortedWith(String.CASE_INSENSITIVE_ORDER)

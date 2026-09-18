@@ -20,7 +20,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | opencode plugin | ✅ |
 | zcode hook (Linux / Windows / macOS, bash 3.2 compatible) | ✅ |
 
-Current release: [v0.0.9](https://github.com/dilfi5h/agentping/releases/tag/v0.0.9)
+Current release: [v0.0.10](https://github.com/dilfi5h/agentping/releases/tag/v0.0.10)
 
 ## Download the App
 
@@ -43,7 +43,7 @@ On first install, grant the notification permission; it's also recommended to ad
 
 - Four states: `started` / `finished` / `failed` / `waiting`
 - One long-lived WebSocket subscription; resumes after disconnects via `since=<last_id>`
-- Local Room history; failures and waiting states use high-priority notifications
+- Local Room history (7 days), searchable on the timeline with host/agent chips; failures and waiting states use high-priority notifications
 
 **Doesn't do (V1):**
 

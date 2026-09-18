@@ -167,7 +167,7 @@ started: a legal state, hooks may keep calling; the reporter exits 0 silently wi
 | Start on boot | `BOOT_COMPLETED` receiver restarts the service; can be turned off in settings | The phone resumes subscribing automatically after a server reboot |
 | Notification tiers | 3 channels: task status (default, silent) / failure & waiting (sound + banner) / service running (min importance) | Interruption control for a read-only scenario |
 | Data flow | WS thread → kotlinx-serialization streaming parse → Room (IO) → StateFlow → Compose | Unidirectional data flow; parse on the stream, never buffer whole |
-| UI | Single Activity + Compose: timeline (card stream with agent/host filter chips) / settings / about | Zero custom Views |
+| UI | Single Activity + Compose: timeline (session cards, search, host/agent chips, Active/Today/Earlier) / settings | Zero custom Views |
 | Dependencies | okhttp, room, kotlinx-serialization, compose — no third-party push libs or heavyweight libraries | PiPilot lesson: dependencies must survive the proxy |
 
 **Steady-state power estimate**: 1 WS + 30s heartbeats ≈ a few KB/hour; no GPS / no wakeups / no polling → expected < 1%/day.
@@ -237,4 +237,4 @@ Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/code
 | M1 server up | ntfy live + subdomain + two tokens; curl publishes → official ntfy App on the phone receives | End-to-end < 2s |
 | M2 hooks | agent-notify finalized + pi/zcode/claude wired | All four states received for real tasks |
 | M3 App MVP | WS subscribe + notifications + timeline + settings page | Installs on device, self-heals after process kill, reconnects after network loss |
-| M4 polish | Filters / history search / start on boot / notification tiers | Ship v0.0.1 stable |
+| M4 polish | Filters / history search / start on boot / notification tiers | Search + host/agent chips + 7-day local retention shipped; boot and notification tiers already in |

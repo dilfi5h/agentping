@@ -42,7 +42,7 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(m: MessageEntity): Long
 
-    @Query("SELECT * FROM messages ORDER BY time DESC LIMIT 1000")
+    @Query("SELECT * FROM messages ORDER BY time DESC")
     fun timeline(): Flow<List<MessageEntity>>
 
     @Query("SELECT id FROM messages ORDER BY time DESC LIMIT 1")
@@ -70,7 +70,7 @@ interface DeletedDao {
     @Query("SELECT EXISTS(SELECT 1 FROM deleted_ids WHERE id = :id)")
     suspend fun exists(id: String): Boolean
 
-    /** ntfy caches 12h, keeping tombstones for 2 days is enough to cover any replay window. */
+    /** Keep tombstones a day longer than local history so a 7-day prune cannot resurrect a swipe-delete. */
     @Query("DELETE FROM deleted_ids WHERE deletedAt < :before")
     suspend fun prune(before: Long)
 }

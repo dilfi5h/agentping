@@ -188,9 +188,9 @@ class PingService : Service() {
     }
 
     private suspend fun pruneOld() {
-        // cache-duration is 12h, keep local history slightly longer: 3 days
-        db.dao().prune(System.currentTimeMillis() - 3 * 24 * 3600_000L)
-        db.deletedDao().prune(System.currentTimeMillis() - 2 * 24 * 3600_000L)
+        // ntfy cache-duration is 12h; keep local history for 7 days so search still finds recent sessions
+        db.dao().prune(System.currentTimeMillis() - 7 * 24 * 3600_000L)
+        db.deletedDao().prune(System.currentTimeMillis() - 8 * 24 * 3600_000L)
     }
 
     // ---- Notifications ----

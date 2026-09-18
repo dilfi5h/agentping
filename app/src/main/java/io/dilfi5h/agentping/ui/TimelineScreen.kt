@@ -18,15 +18,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
@@ -38,7 +44,9 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,17 +56,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.dilfi5h.agentping.data.MessageEntity
 import io.dilfi5h.agentping.data.StateKind
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 fun stateColor(s: StateKind): Color = when (s) {
@@ -71,7 +80,7 @@ fun stateColor(s: StateKind): Color = when (s) {
 
 /** Cards always show UTC+8 absolute time (unambiguous across multiple servers/time zones). */
 private val CST_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
-    .withZone(ZoneId.of("Asia/Shanghai"))
+    .withZone(DISPLAY_ZONE)
 
 fun absTime(ms: Long): String = CST_FORMAT.format(Instant.ofEpochMilli(ms))
 
@@ -92,7 +101,19 @@ fun TimelineScreen(
     var refreshing by remember { mutableStateOf(false) }
     var detailOf by remember { mutableStateOf<MessageEntity?>(null) }
     var selectedSessionId by remember { mutableStateOf<String?>(null) }
+    var query by remember { mutableStateOf("") }
+    var hostFilter by remember { mutableStateOf<String?>(null) }
+    var agentFilter by remember { mutableStateOf<String?>(null) }
     val timelineEntries = remember(messages) { aggregateTimeline(messages) }
+    val hosts = remember(messages) { distinctHosts(messages) }
+    val agents = remember(messages) { distinctAgents(messages) }
+    val filter = remember(query, hostFilter, agentFilter) {
+        TimelineFilter(query = query, host = hostFilter, agent = agentFilter)
+    }
+    val filteredEntries = remember(timelineEntries, filter) { filterEntries(timelineEntries, filter) }
+    val sections = remember(filteredEntries) {
+        sectionEntries(filteredEntries, System.currentTimeMillis())
+    }
     val selectedMessages = remember(messages, selectedSessionId) {
         selectedSessionId?.let { sessionId ->
             messages
@@ -100,6 +121,7 @@ fun TimelineScreen(
                 .sortedWith(compareByDescending<MessageEntity> { it.time }.thenByDescending { it.id })
         }
     }
+    val showFilters = messages.isNotEmpty() && selectedSessionId == null
 
     // Collapse the indicator on connect success or any terminal state (failed/lost/closed) so a 401 doesn't spin forever
     LaunchedEffect(connectionState) {
@@ -108,31 +130,148 @@ fun TimelineScreen(
     LaunchedEffect(selectedSessionId, selectedMessages?.size) {
         if (selectedSessionId != null && selectedMessages.isNullOrEmpty()) selectedSessionId = null
     }
+    LaunchedEffect(hosts, hostFilter) {
+        if (hostFilter != null && hostFilter !in hosts) hostFilter = null
+    }
+    LaunchedEffect(agents, agentFilter) {
+        if (agentFilter != null && agentFilter !in agents) agentFilter = null
+    }
     BackHandler(enabled = selectedSessionId != null) { selectedSessionId = null }
 
-    PullToRefreshBox(
-        isRefreshing = refreshing,
-        onRefresh = { refreshing = true; onRefresh() },
-        modifier = modifier.fillMaxSize(),
-    ) {
-        when {
-            messages.isEmpty() -> EmptyTimeline(connectionState)
-            selectedSessionId != null && !selectedMessages.isNullOrEmpty() -> SessionTimeline(
-                sessionId = selectedSessionId!!,
-                messages = selectedMessages,
-                onBack = { selectedSessionId = null },
-                onDelete = onDelete,
-                onOpen = { detailOf = it },
+    Column(modifier.fillMaxSize()) {
+        if (showFilters) {
+            TimelineFilters(
+                query = query,
+                onQueryChange = { query = it },
+                hosts = hosts,
+                agents = agents,
+                hostFilter = hostFilter,
+                agentFilter = agentFilter,
+                onHostFilter = { hostFilter = it },
+                onAgentFilter = { agentFilter = it },
             )
-            else -> AggregatedTimeline(
-                entries = timelineEntries,
-                onOpenSession = { selectedSessionId = it },
-                onDelete = onDelete,
-                onOpenMessage = { detailOf = it },
-            )
+        }
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = { refreshing = true; onRefresh() },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            when {
+                messages.isEmpty() -> EmptyTimeline(connectionState)
+                selectedSessionId != null && !selectedMessages.isNullOrEmpty() -> SessionTimeline(
+                    sessionId = selectedSessionId!!,
+                    messages = selectedMessages,
+                    onBack = { selectedSessionId = null },
+                    onDelete = onDelete,
+                    onOpen = { detailOf = it },
+                )
+                filteredEntries.isEmpty() -> NoMatches(filter.hasConstraints)
+                else -> AggregatedTimeline(
+                    sections = sections,
+                    onOpenSession = { selectedSessionId = it },
+                    onDelete = onDelete,
+                    onOpenMessage = { detailOf = it },
+                )
+            }
         }
     }
     detailOf?.let { MessageDetailSheet(it) { detailOf = null } }
+}
+
+@Composable
+private fun TimelineFilters(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    hosts: List<String>,
+    agents: List<String>,
+    hostFilter: String?,
+    agentFilter: String?,
+    onHostFilter: (String?) -> Unit,
+    onAgentFilter: (String?) -> Unit,
+) {
+    val focus = LocalFocusManager.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(top = 8.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            label = { Text("Search") },
+            placeholder = { Text("Task, session, host, detail") },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                    }
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+        )
+        if (hosts.size > 1) {
+            FilterChipRow(
+                options = hosts,
+                selected = hostFilter,
+                onSelect = onHostFilter,
+            )
+        }
+        if (agents.size > 1) {
+            FilterChipRow(
+                options = agents,
+                selected = agentFilter,
+                onSelect = onAgentFilter,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterChipRow(
+    options: List<String>,
+    selected: String?,
+    onSelect: (String?) -> Unit,
+) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(options, key = { it }) { option ->
+            FilterChip(
+                selected = selected == option,
+                onClick = { onSelect(if (selected == option) null else option) },
+                label = { Text(option) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NoMatches(hasConstraints: Boolean) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (hasConstraints) "No matching sessions\n\nClear search or chips to see the full timeline"
+            else "No messages yet",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+                .height(240.dp),
+        )
+    }
 }
 
 @Composable
@@ -159,7 +298,7 @@ private fun EmptyTimeline(connectionState: String) {
 
 @Composable
 private fun AggregatedTimeline(
-    entries: List<TimelineEntry>,
+    sections: TimelineSections,
     onOpenSession: (String) -> Unit,
     onDelete: (String) -> Unit,
     onOpenMessage: (MessageEntity) -> Unit,
@@ -169,15 +308,36 @@ private fun AggregatedTimeline(
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(entries, key = { it.stableKey }) { entry ->
-            when (entry) {
-                is TimelineEntry.SessionGroup -> SessionGroupCard(entry, onOpenSession)
-                is TimelineEntry.SingleMessage -> SwipeDeleteCard(
-                    entry.message,
-                    onDelete,
-                    onOpen = { onOpenMessage(entry.message) },
-                )
-            }
+        timelineSection("Active", sections.active, onOpenSession, onDelete, onOpenMessage)
+        timelineSection("Today", sections.today, onOpenSession, onDelete, onOpenMessage)
+        timelineSection("Earlier", sections.earlier, onOpenSession, onDelete, onOpenMessage)
+    }
+}
+
+private fun LazyListScope.timelineSection(
+    title: String,
+    entries: List<TimelineEntry>,
+    onOpenSession: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenMessage: (MessageEntity) -> Unit,
+) {
+    if (entries.isEmpty()) return
+    item(key = "section-$title") {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+        )
+    }
+    items(entries, key = { it.stableKey }) { entry ->
+        when (entry) {
+            is TimelineEntry.SessionGroup -> SessionGroupCard(entry, onOpenSession)
+            is TimelineEntry.SingleMessage -> SwipeDeleteCard(
+                entry.message,
+                onDelete,
+                onOpen = { onOpenMessage(entry.message) },
+            )
         }
     }
 }
