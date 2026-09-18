@@ -220,7 +220,7 @@ agentping/
 
 Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/codex snippets can still be added later; **three install scripts** for Windows / Linux / macOS (macOS reuses the Linux reporter) rather than one auto-mixing script.
 - Standalone GitHub repo (new, public, same dilfi5h account)
-- Build: JDK 17 + AGP 8.7.x + Compose BOM, local Gradle 8.9 invoked directly (same environment as PiPilot); CI follows the setup-java/gradle + actions template
+- Build: JDK 17 + AGP 8.7.x + Compose BOM, local Gradle 8.9 invoked directly (same environment as PiPilot); release is R8-minified + resource-shrunk (keep rules: `app/proguard-rules.pro`, deobfuscation map: `app/build/outputs/mapping/release/mapping.txt`); CI follows the setup-java/gradle + actions template
 - Signing: **an independent new keystore** (not shared with PiPilot — two apps, two identities); generated at kickoff, uploaded to GH Secrets
 
 ## 8. Development Flow (user-approved)

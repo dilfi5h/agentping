@@ -16,8 +16,8 @@ android {
         applicationId = "io.dilfi5h.agentping"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.0.10"
+        versionCode = 11
+        versionName = "0.0.11"
     }
 
     signingConfigs {
@@ -35,7 +35,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Shrink + optimize with R8 and drop unreachable resources: the published APK is the only
+            // artifact users install, so it must not carry the debug build's slack.
+            // R8 "full mode" (AGP default) is stricter — the keep rules in proguard-rules.pro must be
+            // real ones, no "guess a reflective use and keep everything" fallback.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             val ks = rootProject.file("keystore.properties")
             if (ks.exists()) signingConfig = signingConfigs.getByName("release")

@@ -20,7 +20,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | opencode plugin | ✅ |
 | zcode hook (Linux / Windows / macOS, bash 3.2 compatible) | ✅ |
 
-Current release: [v0.0.10](https://github.com/dilfi5h/agentping/releases/tag/v0.0.10)
+Current release: [v0.0.11](https://github.com/dilfi5h/agentping/releases/tag/v0.0.11)
 
 ## Download the App
 
@@ -182,6 +182,7 @@ The App only subscribes to `agentping-all`. Full fields and validation rules: se
 ## Development
 
 - App: Kotlin + Compose, JDK 17, AGP 8.7.x
+- Release builds are R8-minified (`isMinifyEnabled`) with resource shrinking (`isShrinkResources`); keep rules live in `app/proguard-rules.pro`
 - Push to `main` → CI updates the `dev` prerelease APK
 - Tag `v*` → CI builds the release APK
 
