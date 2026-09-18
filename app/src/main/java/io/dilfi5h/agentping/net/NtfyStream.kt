@@ -15,7 +15,7 @@ import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 
 sealed interface StreamEnd {
-    /** opened=true 表示曾成功建立（用于重置重连退避）。 */
+    /** opened=true means the connection was established at some point (used to reset reconnect backoff). */
     data class Closed(val opened: Boolean) : StreamEnd
 }
 
@@ -26,22 +26,22 @@ class NtfyStream(
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS) // WS 长连接，靠 ntfy 30s keepalive 保活
-        .pingInterval(20, TimeUnit.SECONDS) // VPN 掐断 socket 常无 RST/FIN，ping 是唯一探测手段，20s 尽快发现黑连接
+        .readTimeout(0, TimeUnit.MILLISECONDS) // long-lived WS connection, kept alive by ntfy's 30s keepalive
+        .pingInterval(20, TimeUnit.SECONDS) // a VPN killing the socket often sends no RST/FIN; pings are the only probe, 20s catches dead connections fast
         .build()
 
-    /** 当前连接是否为历史回放（重装首连/下拉刷新 12h）：true 时 onFrame 只进时间线不通知。 */
+    /** Whether the current connection is a history replay (first connect after reinstall / 12h pull-to-refresh): when true, onFrame only fills the timeline without notifying. */
     @Volatile
     var backfillMode: Boolean = false
         private set
 
-    /** 连接打开时刻的服务器时间（毫秒，来自握手响应 Date 头，0=未知）。
-     *  发布时间早于它的消息属于断线补回，晚于它的是实时消息——用服务器时钟对齐，不受本机时钟偏移影响。 */
+    /** Server time (millis, from the handshake response's Date header, 0=unknown) when the connection opened.
+     *  Messages published before it are recovered from the outage; later ones are real-time — aligned by the server clock, immune to local clock drift. */
     @Volatile
     var openServerTimeMillis: Long = 0L
         private set
 
-    /** 打开订阅并挂起直到连接失败/关闭。message 帧在 scope 里异步回调 onFrame。 */
+    /** Opens the subscription and suspends until the connection fails/closes. message frames call onFrame asynchronously within scope. */
     suspend fun connectOnce(settings: PingSettings, since: String?, backfill: Boolean): StreamEnd {
         backfillMode = backfill
         openServerTimeMillis = 0L
@@ -67,27 +67,27 @@ class NtfyStream(
                     }.getOrDefault(0L)
                 } ?: 0L
                 AppLog.log("WS", "open http=${response.code} serverTime=$openServerTimeMillis")
-                onState("已连接")
+                onState("Connected")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 val frame = parseFrame(text)
                 if (frame == null) {
                     AppLog.log("WS", "unparseable frame: ${text.take(120)}")
-                    return // 非法帧直接丢，永不崩
+                    return // drop malformed frames outright, never crash
                 }
                 if (frame.event == "open") {
                     AppLog.log("WS", "stream open frame")
-                    if (!didOpen) { didOpen = true; onState("已连接") }
+                    if (!didOpen) { didOpen = true; onState("Connected") }
                     return
                 }
-                if (frame.event != "message") return // keepalive 等忽略
+                if (frame.event != "message") return // ignore keepalive etc.
                 AppLog.log("WS", "msg id=${frame.id} title=${frame.title?.take(60)}")
                 scope.launch {
                     try {
                         onFrame(frame)
                     } catch (e: Exception) {
-                        // 单条消息处理异常不能带崩协程根（否则整个进程退出，通知全断）
+                        // an error handling a single message must not crash the coroutine root (otherwise the whole process dies and all notifications stop)
                         AppLog.log("WS", "onFrame error ${e.javaClass.simpleName}: ${e.message}")
                     }
                 }
@@ -95,12 +95,12 @@ class NtfyStream(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 AppLog.log("WS", "failure opened=$didOpen ${t.javaClass.simpleName}: ${t.message} http=${response?.code}")
-                // 401=token 无效；403=token 有效但没读权限（典型：误填发布 token）
+                // 401=invalid token; 403=valid token but no read permission (typical: pasted the publish token by mistake)
                 onState(
                     when (response?.code) {
-                        401 -> "token 无效（401），请检查是否粘贴完整"
-                        403 -> "token 无读权限（403）——是不是把发布 token 填进来了？App 只能填 read token"
-                        else -> if (didOpen) "连接中断" else "连接失败（网络?）"
+                        401 -> "Invalid token (401); check that you pasted it in full"
+                        403 -> "Token has no read permission (403) — did you paste the publish token? The App only accepts a read token"
+                        else -> if (didOpen) "Connection lost" else "Connection failed (network?)"
                     }
                 )
                 done.complete(StreamEnd.Closed(didOpen))
@@ -108,7 +108,7 @@ class NtfyStream(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 AppLog.log("WS", "closed code=$code reason=$reason")
-                onState("连接关闭")
+                onState("Connection closed")
                 done.complete(StreamEnd.Closed(didOpen))
             }
         })

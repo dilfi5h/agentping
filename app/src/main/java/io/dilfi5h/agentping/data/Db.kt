@@ -13,13 +13,13 @@ import androidx.room.RoomDatabase
 import kotlinx.coroutines.flow.Flow
 
 /**
- * 一条 ntfy message 帧。主键用 ntfy 的幂等键 id（since 续传重放时不重不漏，
- * 冲突即重复消息，insert IGNORE 丢弃）。
+ * One ntfy message frame. Primary key is ntfy's idempotent id (resume/replay via since never
+ * duplicates or drops; a conflict means a duplicate message, dropped by insert IGNORE).
  */
 @Entity(tableName = "messages")
 data class MessageEntity(
     @PrimaryKey val id: String,
-    /** ntfy 侧秒级时间戳 * 1000；时间线排序一律用它（reporter 时钟不可信）。 */
+    /** ntfy-side second-level timestamp * 1000; timeline sorting always uses it (reporter clocks are untrusted). */
     val time: Long,
     val topic: String,
     val title: String?,
@@ -38,7 +38,7 @@ data class MessageEntity(
 
 @Dao
 interface MessageDao {
-    /** @return 新插入行 id；-1 表示与已有消息重复（ntfy id 幂等）。 */
+    /** @return id of the newly inserted row; -1 means it duplicates an existing message (ntfy id is idempotent). */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(m: MessageEntity): Long
 
@@ -55,7 +55,7 @@ interface MessageDao {
     suspend fun prune(before: Long)
 }
 
-/** 已删除消息的墓碑：服务器缓存回放（since=12h 刷新）时跳过这些 id，避免删除复活的。 */
+/** Tombstone for deleted messages: skips these id when the server cache replays (since=12h refresh), so deletes don't come back to life. */
 @Entity(tableName = "deleted_ids")
 data class DeletedId(
     @PrimaryKey val id: String,
@@ -70,7 +70,7 @@ interface DeletedDao {
     @Query("SELECT EXISTS(SELECT 1 FROM deleted_ids WHERE id = :id)")
     suspend fun exists(id: String): Boolean
 
-    /** ntfy 缓存 12h，墓碑留 2 天足够覆盖任何回放窗口。 */
+    /** ntfy caches 12h, keeping tombstones for 2 days is enough to cover any replay window. */
     @Query("DELETE FROM deleted_ids WHERE deletedAt < :before")
     suspend fun prune(before: Long)
 }

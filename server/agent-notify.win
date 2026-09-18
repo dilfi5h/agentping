@@ -4,9 +4,9 @@ export LC_ALL=C.UTF-8
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
 # agent-notify.win — AgentPing reporter for Windows/Git Bash
-# 发布走 python urllib（避免 curl header 中文乱码）
-# 配置来源: 环境变量 > /etc/agentping.conf > ~/.agentping.conf
-# 任何自身错误 → stderr 一行 + exit 0
+# Publishes via python urllib (avoids curl header mojibake with non-ASCII text)
+# Config sources: env vars > /etc/agentping.conf > ~/.agentping.conf
+# Any internal error → one stderr line + exit 0
 
 STATE="${1:-}"; shift 2>/dev/null || true
 AGENT="shell"

@@ -1,64 +1,66 @@
-# AgentPing 设计文档
+# AgentPing Design Document
 
-> AgentPing：通用 coding-agent 任务状态推送。任何 agent 在任何服务器上跑任务，
-> 手机实时收到状态卡片，可回看历史。只读、省电、零侵入。
-> 与 PiPilot 平行独立（PiPilot = 操控，AgentPing = 通知），不复用代码。
+> AgentPing: general task-status push for coding agents. Any agent running a task on any
+> server sends status cards to your phone in real time, with look-back history.
+> Read-only, battery-friendly, zero-intrusion.
+> Parallel to and independent of PiPilot (PiPilot = control, AgentPing = notification); no shared code.
 
-状态：设计定稿 2026-09-12。进度：M1 服务器 ✅（见 §5）、M3 App MVP ✅（v0.0.1 已发，
-仓库 github.com/dilfi5h/agentping，verify 走 tag→CI→deb 拉取）、M2 进行中（agent-notify ✅ +
-pi 钩子 ✅ + zcode Windows/macOS ✅，claude 未接）。
-补充定稿（2026-09-12 开工会）：① topic 发现 = reporter 双写总 topic（见 §3.3/§3.4）；② waiting 是只读快照、无解除事件；③ 钩子路径不带 `dur`（仅 L2 包装提供）；④ 时间线排序一律用 ntfy 帧 `time`，`ts` 仅展示。
+Status: design finalized 2026-09-12. Progress: M1 server ✅ (§5), M3 App MVP ✅ (v0.0.1 released,
+repo github.com/dilfi5h/agentping, verification via tag→CI→deb fetch), M2 in progress (agent-notify ✅ +
+pi hook ✅ + zcode Windows/macOS ✅, claude not wired).
+Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double-writes to the catch-all topic (§3.3/§3.4); ② waiting is a read-only snapshot with no resolution event; ③ hook paths don't carry `dur` (only the L2 wrapper provides it); ④ timeline sorting always uses the ntfy frame's `time`; `ts` is display-only.
 
-## 1. 目标与非目标
+## 1. Goals and Non-Goals
 
-**目标（V1）**
+**Goals (V1)**
 
-- 单向只读推送：agent 任务的四种状态（started / finished / failed / waiting）
-- 电池优先：稳态功耗目标 < 1%/天（无轮询、无唤醒锁滥用、一条长连做全部订阅）
-- 性能优先：消息端到端延迟 < 2s（局域网质量的服务器 < 1s）；历史查询本地 Room，毫秒级
-- 覆盖：有钩子的 agent 走原生集成（pi / zcode / Claude Code / Codex / OpenCode / Gemini CLI），没有的走进程包装兜底（100% 覆盖）
-- 肉眼兼容：消息不用 App 也能读（ntfy 官方 App / 短信式 fallback）
+- One-way read-only push: four states of an agent task (started / finished / failed / waiting)
+- Battery first: steady-state power target < 1%/day (no polling, no wake-lock abuse, one long connection for all subscriptions)
+- Performance first: end-to-end message latency < 2s (< 1s on a LAN-quality server); history queries hit local Room, in milliseconds
+- Coverage: agents with hooks get native integrations (pi / zcode / Claude Code / Codex / OpenCode / Gemini CLI); the rest fall back to process wrapping (100% coverage)
+- Human-readable at a glance: messages are readable without the App (official ntfy App / SMS-style fallback)
 
-**非目标（V1 明确不做）**
+**Non-Goals (explicitly not in V1)**
 
-- ❌ 任何写操作：不批准、不中止、不回复。App 没有发布 token，服务端权限层面禁写
-- ❌ 双向通道、远程终端、文件传输
-- ❌ 桌面端、多用户、Web 界面
-- ❌ tmux 抓屏式状态识别（V2 再议，启发式易碎）
+- ❌ Any write operation: no approving, no aborting, no replying. The App holds no publish token; the server denies writes at the permission layer
+- ❌ Two-way channels, remote terminal, file transfer
+- ❌ Desktop client, multi-user, web UI
+- ❌ tmux screen-scraping state detection (revisit in V2; heuristics are fragile)
 
-## 2. 总体架构
+## 2. Overall Architecture
 
 ```
-┌─ 服务器(deb 等) ──────────────────────────┐      ┌─ 手机 ─────────────┐
-│ agent(hook) ─▶ agent-notify ──HTTPS POST──┼─▶ ntfy ─WebSocket──▶ AgentPing │
-│            (~30行脚本, 组JSON+curl)        │    (systemd,    foreground      │
-│ agentping run <cmd> (进程包装兜底)          │     只读token)   service+Room   │
-└──────────────────────────────────────────┘      └───────────────────┘
+┌─ server (deb etc.) ────────────────────────┐      ┌─ phone ──────────────┐
+│ agent(hook) ─▶ agent-notify ──HTTPS POST──┼─▶ ntfy ─WebSocket─▶ AgentPing │
+│            (~30-line script: JSON + curl)   │    (systemd,    foreground    │
+│ agentping run <cmd> (process-wrap fallback) │    read-only token) service+Room │
+└────────────────────────────────────────────┘      └────────────────────────┘
 ```
 
-组件职责：
+Component responsibilities:
 
-- **agent-notify**（服务器，~30 行 bash）：唯一的服务器侧程序。组装 JSON、带 token
-  curl POST 到 ntfy、5 秒超时、任何错误静默退出 0（绝不影响 agent 本身）
-- **ntfy**（服务器，官方单二进制 + systemd）：消息总线。自带鉴权、离线缓存、
-  topic 权限、keepalive。不写任何自定义代码
-- **AgentPing App**（Android）：前台服务持一条 WebSocket 订阅全部 topic；
-  Room 本地历史；系统通知；卡片时间线 UI
+- **agent-notify** (server, ~30 lines of bash): the only server-side program. Assembles the
+  JSON, curl POSTs to ntfy with a token, 5s timeout, exits 0 silently on any error
+  (never affects the agent itself)
+- **ntfy** (server, official single binary + systemd): the message bus. Ships auth, offline
+  cache, topic permissions, keepalive. Zero custom code
+- **AgentPing App** (Android): a foreground service holding one WebSocket subscription for all
+  topics; Room local history; system notifications; card timeline UI
 
-## 3. 协议规范（v1，详细版）
+## 3. Protocol Specification (v1, detailed)
 
-### 3.1 传输载体与双格式设计
+### 3.1 Transport Carrier and Dual-Format Design
 
-推送载体是 ntfy 的 message 字段。**一条消息两种读法**（关键设计）：
+The push carrier is ntfy's message field. **One message, two readings** (the key design):
 
-- `title` = 人类可读摘要，模板 `[<{host}>] {agent} {状态中文}`，例：`[deb] zcode 等待批准`
-- `message` = **单行 JSON**（§3.2 结构化载荷）
+- `title` = human-readable summary, template `[<{host}>] {agent} {state label}`, e.g. `[deb] zcode Awaiting approval`
+- `message` = **single-line JSON** (§3.2 structured payload)
 
-效果：
-- AgentPing 解析 message 的 JSON → 结构化卡片；解析失败（非法 JSON）→ 整条按纯文本渲染，永不崩
-- 用 ntfy 官方 App 订阅同一 topic 时，title + message 也能读（message 是 JSON 串，可读性可接受）——这是调试和兜底通道
+Effects:
+- AgentPing parses the message's JSON → structured card; on parse failure (invalid JSON) → the whole message renders as plain text, never crashes
+- Subscribing to the same topic with the official ntfy App still reads title + message fine (the message is a JSON string, acceptable readability) — that's the debugging and fallback channel
 
-### 3.2 载荷 Schema（AgentPing v1）
+### 3.2 Payload Schema (AgentPing v1)
 
 ```json
 {
@@ -66,7 +68,7 @@ pi 钩子 ✅ + zcode Windows/macOS ✅，claude 未接）。
   "agent": "zcode",
   "host": "deb",
   "state": "waiting",
-  "task": "修复登录bug",
+  "task": "fix login bug",
   "detail": "PermissionRequest: Bash(rm -rf /tmp/x)",
   "session": "sess_fe97e70b",
   "ts": 1760000000000,
@@ -74,31 +76,31 @@ pi 钩子 ✅ + zcode Windows/macOS ✅，claude 未接）。
 }
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `v` | int | ✅ | 协议版本，恒为 1。App 收到 v>1 时按能力降级渲染（未知字段一律忽略） |
-| `agent` | string | ✅ | 小写标识：`pi` `zcode` `claude` `codex` `gemini` `opencode` `shell`（L2 包装默认值）或其它自定义串。App 未知 agent 按通用样式渲染 |
-| `host` | string | ✅ | 机器名，reporter 用 `hostname -s` 自动取，可被 `--host` 覆盖 |
-| `state` | string | ✅ | 四选一，小写：`started` / `finished` / `failed` / `waiting`。waiting 是只读快照，无解除事件（本机批准后任务继续跑，waiting 不撤回，后续 finished/failed 自然覆盖时间线）。**`started` 仍为合法 state（钩子可继续传），但 reporter 不发布**（高频无行动价值；App 若偶发收到也只进时间线不弹通知） |
-| `task` | string | ❌ | 任务一句话摘要，建议 ≤80 字符。来源：钩子上下文里能拿到的 prompt 片段/文件名，拿不到就省略 |
-| `detail` | string | ❌ | 补充信息 ≤500 字符：退出码、错误消息、权限请求的命令原文 |
-| `session` | string | ❌ | 会话标识（原样透传，App V1 只显示不解析）。V2 远程操作的寻址钥匙 |
-| `ts` | long | ❌ | 毫秒时间戳，reporter 侧时钟，**仅展示用**。缺省用 ntfy 落库时间。多服务器时钟漂移不可信，时间线排序一律用 ntfy 帧自带 `time` |
-| `dur` | long | ❌ | 任务时长毫秒，仅 finished/failed 有意义。**钩子路径不提供**（钩子是无状态单次触发进程）；仅 `agentping run` 进程包装能算 | |
+| `v` | int | ✅ | Protocol version, always 1. On v>1 the App renders with capability degradation (unknown fields are ignored) |
+| `agent` | string | ✅ | Lowercase identifier: `pi` `zcode` `claude` `codex` `gemini` `opencode` `shell` (L2 wrapper default) or any custom string. The App renders unknown agents with a generic style |
+| `host` | string | ✅ | Machine name; the reporter takes `hostname -s` automatically, overridable via `--host` |
+| `state` | string | ✅ | One of four, lowercase: `started` / `finished` / `failed` / `waiting`. waiting is a read-only snapshot with no resolution event (after approving locally the task keeps running; the waiting entry isn't retracted and later finished/failed naturally supersede it in the timeline). **`started` remains a legal state (hooks may keep sending it), but the reporter doesn't publish it** (high frequency, no action value; if the App ever receives one it only enters the timeline without a notification) |
+| `task` | string | ❌ | One-line task summary, ≤80 chars recommended. Source: prompt snippets / file names available in the hook context; omit if unavailable |
+| `detail` | string | ❌ | Extra info ≤500 chars: exit code, error message, the exact command of a permission request |
+| `session` | string | ❌ | Session identifier (passed through verbatim; the App V1 only displays it). The addressing key for V2 remote operations |
+| `ts` | long | ❌ | Millisecond timestamp on the reporter's clock, **display only**. Defaults to ntfy's store time. Multi-server clock drift is untrusted; timeline sorting always uses the ntfy frame's own `time` |
+| `dur` | long | ❌ | Task duration in ms, meaningful only for finished/failed. **Not provided on the hook path** (hooks are stateless single-shot processes); only the `agentping run` process wrapper can compute it |
 
-**校验规则**（App 侧宽松、reporter 侧严格）：
+**Validation rules** (lenient on the App side, strict on the reporter side):
 
-- reporter：state/agent 非法值直接拒绝发送（本地 stderr 报错）；JSON 单行，禁止换行
-- App：任何字段缺失/类型不符 → 该字段按默认值，消息仍显示（title + 原文），仅 schema 校验整体失败时降级纯文本
-- 版本策略：加字段 = v1 不变（向后兼容）；改字段语义 = v2，App 按 `v` 分支
+- reporter: illegal state/agent values refuse to send (local stderr error); JSON on a single line, no newlines
+- App: any missing field / type mismatch → that field takes its default and the message still displays (title + raw text); degrade to plain text only when schema validation fails outright
+- Versioning: adding fields = still v1 (backward compatible); changing semantics = v2, the App branches on `v`
 
-### 3.3 ntfy 发布请求（reporter → ntfy）
+### 3.3 ntfy Publish Request (reporter → ntfy)
 
 ```bash
-# 双写总 topic：ntfy 发布不支持逗号多 topic（订阅才支持），所以是两次 POST
+# Double-write to the catch-all topic: ntfy publishing doesn't support comma-separated multi-topic (only subscribing does), so it's two POSTs
 curl -m 5 -s -o /dev/null \
   -H "Authorization: Bearer tk_publish_xxx" \
-  -H "Title: [deb] zcode 等待批准" \
+  -H "Title: [deb] zcode Awaiting approval" \
   -H "Tags: robot,hourglass" \
   -H "Priority: high" \
   -H "Markdown: no" \
@@ -110,129 +112,129 @@ curl -m 5 -s -o /dev/null \
   https://ntfy.871116.xyz/agentping-all
 ```
 
-- **双写总 topic（topic 发现机制）**：reporter 对 `agentping-<host>` 和 `agentping-all` 各发一次 POST。AgentPing App 只订 `agentping-all`，加新服务器 App 零配置；`agentping-<host>` 保留给 ntfy 官方 App 按机订阅/调试
-- 用 HTTP header 携带 title/tags/priority（JSON 发布体也行，二选一，统一用 header + body，body 即载荷 JSON，避免双层转义）
-- **优先级映射**：started=**不推**（reporter 对 `started` 直接 exit 0）/ finished=default(3) / failed=high(4) / waiting=high(4)。urgent(5) 留给 V2 手动测试
-- **tags（ntfy emoji）**：`robot` 固定带；状态附加：finished=`white_check_mark`、failed=`x`、waiting=`hourglass_flowing_sand`（started 不发布，无 tag）
-- 超时 5 秒、静默失败——钩子永远不能卡住 agent
+- **Double-write to the catch-all topic (the topic-discovery mechanism)**: the reporter POSTs once each to `agentping-<host>` and `agentping-all`. The AgentPing App subscribes only to `agentping-all`, so adding a new server needs zero App configuration; `agentping-<host>` stays available for the official ntfy App to subscribe per machine / debug
+- Carry title/tags/priority in HTTP headers (a JSON publish body works too — pick one; we standardize on header + body, where the body is the payload JSON, avoiding double escaping)
+- **Priority mapping**: started=**don't push** (the reporter exits 0 directly on `started`) / finished=default(3) / failed=high(4) / waiting=high(4). urgent(5) is reserved for V2 manual testing
+- **tags (ntfy emoji)**: `robot` always; per state: finished=`white_check_mark`, failed=`x`, waiting=`hourglass_flowing_sand` (started isn't published, no tag)
+- 5s timeout, silent failure — a hook must never stall the agent
 
-### 3.4 App 订阅协议（ntfy JSON stream）
+### 3.4 App Subscription Protocol (ntfy JSON stream)
 
-- 连接：`WSS ntfy.871116.xyz/agentping-all/ws?since=<last_id>`（**App 只订总 topic `agentping-all`**，见 §3.3 双写机制）
-  - 认证走 okhttp 请求头 `Authorization: Bearer tk_read_xxx`（无需 query 参数）
-  - `since` = 本地持久化的最后一条 **已处理** ntfy message id（Settings prefs 游标，与时间线 `time` 脱钩）→ 断线重连零丢失，不重不漏
-- 流格式：换行分隔 JSON，三类帧：
-  - `{"event":"open",...}` 连接就绪 → 重置退避计时器
-  - `{"event":"keepalive",...}` 服务端 ~30s 心跳 → 忽略（okhttp 自带 ping 兜底 NAT）
-  - `{"event":"message","id":"...","time":...,"title":...,"message":...}` → 处理
-- 处理管线：id 去重（ntfy 幂等键）→ message 字段 JSON 解析 → Room 落库（IO 线程）→ StateFlow 更新 UI + 系统通知
+- Connect: `WSS ntfy.871116.xyz/agentping-all/ws?since=<last_id>` (**the App subscribes only to the catch-all topic `agentping-all`**, see §3.3 double-write)
+  - Auth via the okhttp request header `Authorization: Bearer tk_read_xxx` (no query parameter needed)
+  - `since` = locally persisted id of the last **processed** ntfy message (a Settings prefs cursor, decoupled from the timeline's `time`) → zero loss on reconnect, no duplicates and no gaps
+- Stream format: newline-delimited JSON, three frame types:
+  - `{"event":"open",...}` connection ready → reset the backoff timer
+  - `{"event":"keepalive",...}` server heartbeat ~30s → ignore (okhttp's own ping covers NAT)
+  - `{"event":"message","id":"...","time":...,"title":...,"message":...}` → process
+- Processing pipeline: dedupe by id (ntfy's idempotent key) → parse the message field as JSON → store in Room (IO thread) → StateFlow updates the UI + system notification
 
-### 3.5 reporter（agent-notify）CLI 规范
+### 3.5 Reporter (agent-notify) CLI Specification
 
 ```
-agent-notify <state> [选项]
-  --agent <name>    默认 shell
-  --host <name>     默认 hostname -s
-  --task <text>     摘要
-  --detail <text>   补充
+agent-notify <state> [options]
+  --agent <name>    defaults to shell
+  --host <name>     defaults to hostname -s
+  --task <text>     summary
+  --detail <text>   extra info
   --session <id>
   --dur <ms>
-配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf (KEY=VALUE)
-行为约束: 任何自身错误 → stderr 一行 + exit 0；永不阻塞、永不影响 agent 退出码
-started: 合法 state，钩子可继续调用；reporter 静默 exit 0，不 POST（统一 choke point，各 agent 钩子不必改）
+Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf (KEY=VALUE)
+Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
+started: a legal state, hooks may keep calling; the reporter exits 0 silently without POSTing (one choke point, so each agent's hook needs no change)
 ```
 
-### 3.6 各 agent 钩子接线（M2 范围：pi + zcode + Claude Code）
+### 3.6 Per-Agent Hook Wiring (M2 scope: pi + zcode + Claude Code)
 
-| agent | 触发机制 | 事件 → 状态映射 |
+| Agent | Trigger | Event → state mapping |
 |---|---|---|
-| **pi** | extension `~/.pi/agent/extensions/agentping.js`（✅ 2026-09-12 已落地并真机验证；API：`before_agent_start`/`agent_end`/`agent_settled`，`pi.exec` 调 agent-notify） | `before_agent_start`→started(task=prompt片段；reporter 可能不发布)，缓存本轮 task；`agent_end`(stopReason=error)→failed(task+detail=错误原文)，`agent_settled`→finished(task=本轮 prompt；本 run 已推 failed 则跳过)。**finished/failed 必须带 task**，否则 started 被吞后通知正文只剩 session id |
-| **zcode** | `~/.zcode/cli/config.json` 顶层 `hooks`（⚠ 必须 `enabled:true`，默认禁用；Windows 用 `server/hooks/agentping-zcode-hook`，`install-win.sh` 生成可合并 snippet；macOS 同一脚本兼容 bash 3.2（mapfile 改逐行读数组），`install-macos.sh` 生成 snippet：`process` hook，`command=/bin/bash` + 脚本绝对路径） | 推荐：`UserPromptSubmit`→started（可被吞）, `Stop`→finished（带 task）, `PermissionRequest`→waiting；`PostToolUseFailure`→不推(噪音)。Windows process hook 调 Git Bash；注意 stdin JSON 去 CR |
-| **Claude Code** | `~/.claude/settings.json` hooks | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting（CC 的权限提醒走这个事件） |
-| **opencode** | plugin `~/.config/opencode/plugins/agentping.js`（✅ 2026-09-16 已落地真机验证，v1.18.31；hook：`chat.message`/`event`/`permission.ask`，spawn 调 agent-notify） | `chat.message`→缓存 task（文本在 `output.parts`，**不在** `message.updated` 载荷里）；`session.status:busy`→started（可被吞）；`session.idle`→finished（带 task；failed 已推则跳过）；`session.error`→failed（task+detail）；`permission.ask`→waiting（title+metadata.command） |
-| **Codex** | `~/.codex/config.toml` 的 `notify` | agent-start/agent-end JSON 参数 → started/finished |
-| **OpenCode / Gemini CLI** | plugin / hooks（开工时查当前版本文档） | 同型映射 |
-| **其它一切**（L2 兜底） | `agentping run -- <cmd>` | 启动→started；退出码 0→finished(dur)，非 0→failed(dur, detail=stderr 尾部) |
+| **pi** | extension `~/.pi/agent/extensions/agentping.js` (✅ shipped and device-verified 2026-09-12; API: `before_agent_start`/`agent_end`/`agent_settled`, calls agent-notify via `pi.exec`) | `before_agent_start`→started (task=prompt snippet; the reporter may not publish it), caches this round's task; `agent_end`(stopReason=error)→failed (task+detail=error text); `agent_settled`→finished (task=this round's prompt; skipped if this run already pushed failed). **finished/failed must carry task**, otherwise once started is swallowed the notification body is just the session id |
+| **zcode** | top-level `hooks` in `~/.zcode/cli/config.json` (⚠ must set `enabled:true`, disabled by default; on Windows use `server/hooks/agentping-zcode-hook`, `install-win.sh` generates a mergeable snippet; on macOS the same script is bash 3.2 compatible (mapfile replaced by line-by-line array reads); `install-macos.sh` generates the snippet: a `process` hook with `command=/bin/bash` + absolute script path) | Recommended: `UserPromptSubmit`→started (may be swallowed), `Stop`→finished (with task), `PermissionRequest`→waiting; `PostToolUseFailure`→don't push (noise). The Windows process hook invokes Git Bash; watch for CR in the stdin JSON |
+| **Claude Code** | hooks in `~/.claude/settings.json` | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting (CC routes permission reminders through this event) |
+| **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ shipped and device-verified 2026-09-16, v1.18.31; hooks: `chat.message`/`event`/`permission.ask`, spawns agent-notify) | `chat.message`→cache task (the text lives in `output.parts`, **not** in the `message.updated` payload); `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task; skipped if failed was pushed); `session.error`→failed (task+detail); `permission.ask`→waiting (title+metadata.command) |
+| **Codex** | `notify` in `~/.codex/config.toml` | agent-start/agent-end JSON args → started/finished |
+| **OpenCode / Gemini CLI** | plugin / hooks (check current-version docs at kickoff) | Same-shape mapping |
+| **Everything else** (L2 fallback) | `agentping run -- <cmd>` | launch→started; exit 0→finished(dur), non-zero→failed(dur, detail=stderr tail) |
 
-## 4. App 架构（省电与性能的具体决策）
+## 4. App Architecture (concrete decisions for battery and performance)
 
-| 决策点 | 选择 | 理由 |
+| Decision | Choice | Rationale |
 |---|---|---|
-| 连接方式 | 前台服务 + **单条 WebSocket** | 一个连接订阅 `agentping-all`（总 topic，见 §3.3）；ntfy keepalive 保 NAT；无任何 HTTP 轮询。Android 14+ 需声明 FGS type `dataSync` 并在设置页说明用途 |
-| 丢消息保护 | `since=<last_id>` 续传 | 断线不丢、不重；last_id 是 ntfy 游标，存在 Settings prefs（与时间线 `time` 脱钩）；升级前无游标时回退 Room 最新 id |
-| 重连策略 | 指数退避 1s→2s→…→60s 封顶；`open` 帧重置；网络可用性回调触发立即重连 | 省电与实时的平衡 |
-| Doze/后台 | 前台服务 notification 常驻（silent、min-importance channel 可关） | Android 对后台网络的限制用 FGS 合法绕开，不用 wake-lock |
-| 开机自启 | `BOOT_COMPLETED` 接收器重启服务，设置页可关 | 服务器重启后手机自动恢复订阅 |
-| 通知分级 | 3 个 channel：状态(默认无声) / 失败与等待(有声+横幅) / 服务运行(最低重要性) | 只读场景的干扰控制 |
-| 数据流 | WS 线程 → kotlinx-serialization 流式解析 → Room(IO) → StateFlow → Compose | 单向数据流；解析在流上做，不整段缓冲 |
-| UI | 单 Activity + Compose：时间线(卡片流，按 agent/host 过滤 chips) / 设置 / 关于 | 零自定义 View |
-| 依赖 | okhttp、room、kotlinx-serialization、compose——不引第三方推送/大库 | PiPilot 教训：依赖要过代理 |
+| Connection | Foreground service + **single WebSocket** | One connection subscribes to `agentping-all` (catch-all topic, §3.3); ntfy keepalive holds NAT open; zero HTTP polling. Android 14+ requires declaring FGS type `dataSync` and stating the purpose in the settings page |
+| Message-loss protection | Resume via `since=<last_id>` | No loss, no duplicates on disconnect; last_id is the ntfy cursor stored in Settings prefs (decoupled from the timeline's `time`); if no cursor exists from before an upgrade, fall back to the newest Room id |
+| Reconnect policy | Exponential backoff 1s→2s→…→60s cap; reset on the `open` frame; network-availability callback triggers immediate retry | Balance of battery vs responsiveness |
+| Doze/background | Persistent foreground-service notification (silent, min-importance channel, dismissible) | FGS legally sidesteps Android's background-network limits; no wake-locks |
+| Start on boot | `BOOT_COMPLETED` receiver restarts the service; can be turned off in settings | The phone resumes subscribing automatically after a server reboot |
+| Notification tiers | 3 channels: task status (default, silent) / failure & waiting (sound + banner) / service running (min importance) | Interruption control for a read-only scenario |
+| Data flow | WS thread → kotlinx-serialization streaming parse → Room (IO) → StateFlow → Compose | Unidirectional data flow; parse on the stream, never buffer whole |
+| UI | Single Activity + Compose: timeline (card stream with agent/host filter chips) / settings / about | Zero custom Views |
+| Dependencies | okhttp, room, kotlinx-serialization, compose — no third-party push libs or heavyweight libraries | PiPilot lesson: dependencies must survive the proxy |
 
-**稳态功耗估算**：1 条 WS + 30s 心跳 ≈ 几 KB/小时；无 GPS/无唤醒/无轮询 → 预期 <1%/天。
+**Steady-state power estimate**: 1 WS + 30s heartbeats ≈ a few KB/hour; no GPS / no wakeups / no polling → expected < 1%/day.
 
-## 5. 服务器侧部署（deb）——✅ 2026-09-12 已落地（联调最小配置）
+## 5. Server-Side Deployment (deb) — ✅ shipped 2026-09-12 (minimal integration config)
 
-实际部署（与原计划的差异已核实）：
+Actual deployment (deviations from the original plan verified):
 
-- ntfy v2.28.0 官方单二进制 → `/usr/local/bin/ntfy`，配置 `/etc/ntfy/server.yml`，systemd `ntfy.service`（专用用户 `ntfy`），监听 `127.0.0.1:2586`
-- nginx 是**源码编译版**：`/usr/local/nginx/`，vhost 目录 `/usr/local/nginx/conf/vhost/`（已加 `ntfy.871116.xyz.conf`，带 WS 升级头；管理路径 `/-/` 与 `/v1/` 仅限 127.0.0.1）
-- 证书：deb 上已有泛域名证书 `*.871116.xyz`（`/root/sh/cert.pem`，2026-11-28 到期），ntfy 子域直接复用，无需 certbot
-- 鉴权：`auth-default-access: deny-all`；用户/ACL/token：
-  - `agentping-pub` / `tk_publish_*`：仅写 `agentping-*`（token 在 deb `/etc/agentping.conf`，M2 钩子直接用）
-  - `agentping-sub` / `tk_read_*`：仅读 `agentping-*`（App 用）。**App 侧永远拿不到写 token——服务端层面实现"只读"承诺**
-- 缓存：`cache-duration: 12h`；`keepalive-interval: 30s`
-- ⚠ ntfy 发布不支持逗号多 topic（订阅才支持），双写必须是两次 POST，见 §3.3
-- 备份要求：无状态可重建，配置文件入 dotfiles 即可
+- ntfy v2.28.0 official single binary → `/usr/local/bin/ntfy`, config `/etc/ntfy/server.yml`, systemd `ntfy.service` (dedicated `ntfy` user), listening on `127.0.0.1:2586`
+- nginx is a **source-compiled build**: `/usr/local/nginx/`, vhost dir `/usr/local/nginx/conf/vhost/` (`ntfy.871116.xyz.conf` added, with WS upgrade headers; admin paths `/-/` and `/v1/` restricted to 127.0.0.1)
+- Cert: deb already has a wildcard cert `*.871116.xyz` (`/root/sh/cert.pem`, expires 2026-11-28); the ntfy subdomain reuses it, no certbot needed
+- Auth: `auth-default-access: deny-all`; users/ACL/tokens:
+  - `agentping-pub` / `tk_publish_*`: write to `agentping-*` only (token in deb's `/etc/agentping.conf`, used directly by M2 hooks)
+  - `agentping-sub` / `tk_read_*`: read `agentping-*` only (for the App). **The App can never hold a write token — the "read-only" promise is enforced at the server layer**
+- Cache: `cache-duration: 12h`; `keepalive-interval: 30s`
+- ⚠ ntfy publishing doesn't support comma-separated multi-topic (only subscribing does); the double-write must be two POSTs, see §3.3
+- Backup requirement: stateless and rebuildable; tracking the config files in dotfiles suffices
 
-## 6. 安全
+## 6. Security
 
-- 全链路 TLS；token 最小权限（读/写分离，见 §5）
-- detail 字段可能含命令片段——钩子侧截断 500 字符；App 渲染为纯文本（无 Markdown/HTML 注入面）
-- ntfy 面板/账号不暴露公网（只开 ws/publish 所需路径），管理 API 仅 localhost
-- App 不申请 INTERNET 之外的危险权限（通知权限除外）
+- TLS end to end; least-privilege tokens (read/write separated, §5)
+- The detail field may contain command snippets — truncated to 500 chars on the reporter side; the App renders it as plain text (no Markdown/HTML injection surface)
+- The ntfy panel/accounts aren't exposed publicly (only ws/publish paths are opened); the admin API is localhost-only
+- The App requests no dangerous permissions beyond INTERNET (plus the notification permission)
 
-## 7. 工程与仓库
+## 7. Engineering and Repository
 
 ```
 agentping/
 ├── DESIGN.md
 ├── README.md
 ├── server/
-│   ├── agent-notify              ← Linux reporter（curl）
-│   ├── agent-notify.win          ← Windows/Git Bash reporter 壳
-│   ├── agentping-ntfy-body.py    ← Windows UTF-8 JSON 发布辅助
-│   ├── agent-notify.cmd.example  ← 可选 Win32 启动器示例
+│   ├── agent-notify              ← Linux reporter (curl)
+│   ├── agent-notify.win          ← Windows/Git Bash reporter shell
+│   ├── agentping-ntfy-body.py    ← Windows UTF-8 JSON publish helper
+│   ├── agent-notify.cmd.example  ← optional Win32 launcher example
 │   ├── etc-agentping.conf.example
-│   ├── install.sh                ← Linux：/usr/local/bin + pi 扩展
-│   ├── install-win.sh            ← Windows：~/bin + zcode hook 文件
-│   ├── install-macos.sh          ← macOS：~/bin + zcode hook 文件（复用 Linux reporter）
+│   ├── install.sh                ← Linux: /usr/local/bin + pi extension
+│   ├── install-win.sh            ← Windows: ~/bin + zcode hook files
+│   ├── install-macos.sh          ← macOS: ~/bin + zcode hook files (reuses the Linux reporter)
 │   └── hooks/
 │       ├── pi-extension.js
 │       ├── opencode-plugin.js
 │       ├── agentping-zcode-hook
 │       ├── agentping-zcode-hook-parse.py
-│       └── zcode-snippet.json    ← 占位 snippet；claude/codex 延后
+│       └── zcode-snippet.json    ← placeholder snippet; claude/codex deferred
 ├── app/
 └── .github/workflows/release.yml
 ```
 
-说明：ntfy `server.yml` / systemd 单元、`docs/protocol.md`、claude/codex snippet 仍可后续补；Windows / Linux / macOS **三套 install**（macOS 复用 Linux reporter），不靠单脚本自动混装。
-- 独立 GitHub 仓库（新建，public，同 dilfi5h 账号）
-- 构建：JDK 17 + AGP 8.7.x + Compose BOM，本地 Gradle 8.9 直调（同 PiPilot 环境）；CI 沿用 setup-java/gradle + actions 模板
-- 签名：**独立新 keystore**（不与 PiPilot 共用——两个 app 两个身份），开工生成，上传 GH Secrets
+Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/codex snippets can still be added later; **three install scripts** for Windows / Linux / macOS (macOS reuses the Linux reporter) rather than one auto-mixing script.
+- Standalone GitHub repo (new, public, same dilfi5h account)
+- Build: JDK 17 + AGP 8.7.x + Compose BOM, local Gradle 8.9 invoked directly (same environment as PiPilot); CI follows the setup-java/gradle + actions template
+- Signing: **an independent new keystore** (not shared with PiPilot — two apps, two identities); generated at kickoff, uploaded to GH Secrets
 
-## 8. 开发流程（用户定版）
+## 8. Development Flow (user-approved)
 
-1. 每个功能：本地构建 verify 包 → scp deb `/dl/`（小包直传 / 大包走 CI-release+deb 拉取的老规矩）→ **真机验证**
-2. 真机 OK + 用户点头 → 才 commit/push/打 tag（`v0.0.x` 语义化：状态推送为 0.1.0 起步？不——沿用 PiPilot 手工 0.0.x 习惯，versionCode 每个验证包 +1）
-3. verify 中间版用 `v0.0.x-verifyN` 临时 tag + 临时 Release 通道，正式后即删（PiPilot v0.0.11 已验证的流程）
-4. CI 未改动不盯 CI
+1. Each feature: build a verification package locally → scp to deb's `/dl/` (small packages transfer directly / large ones go through CI-release+deb fetch, the old rules) → **verify on a real device**
+2. Only after a real device passes + the user approves → commit/push/tag (semantic `v0.0.x`: start status push at 0.1.0? No — keep PiPilot's manual 0.0.x convention, versionCode +1 per verification build)
+3. Intermediate verification builds use a temporary `v0.0.x-verifyN` tag + temporary Release channel, deleted once the formal one is out (flow already proven on PiPilot v0.0.11)
+4. Don't watch CI when CI hasn't changed
 
-## 9. 里程碑
+## 9. Milestones
 
-| 里程碑 | 内容 | 验收 |
+| Milestone | Content | Acceptance |
 |---|---|---|
-| M1 服务器通 | ntfy 上线 + 子域名 + 双 token；curl 发→手机 ntfy 官方 App 收 | 端到端 <2s |
-| M2 钩子 | agent-notify 定稿 + pi/zcode/claude 三家接线 | 真实任务四态全收到 |
-| M3 App MVP | WS 订阅 + 通知 + 时间线 + 设置页 | 真机装、杀进程重启自愈、断网重连 |
-| M4 打磨 | 过滤/历史搜索/开机自启/通知分级 | 发 v0.0.1 正式版 |
+| M1 server up | ntfy live + subdomain + two tokens; curl publishes → official ntfy App on the phone receives | End-to-end < 2s |
+| M2 hooks | agent-notify finalized + pi/zcode/claude wired | All four states received for real tasks |
+| M3 App MVP | WS subscribe + notifications + timeline + settings page | Installs on device, self-heals after process kill, reconnects after network loss |
+| M4 polish | Filters / history search / start on boot / notification tiers | Ship v0.0.1 stable |

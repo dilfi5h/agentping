@@ -69,15 +69,15 @@ fun stateColor(s: StateKind): Color = when (s) {
     StateKind.UNKNOWN -> StateUnknown
 }
 
-/** 卡片时间一律显示东八区绝对时间（多服务器/多时区无歧义）。 */
+/** Cards always show UTC+8 absolute time (unambiguous across multiple servers/time zones). */
 private val CST_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
     .withZone(ZoneId.of("Asia/Shanghai"))
 
 fun absTime(ms: Long): String = CST_FORMAT.format(Instant.ofEpochMilli(ms))
 
 private fun sessionCountLabel(count: Int, spanMs: Long?): String = buildString {
-    append("$count 条消息")
-    spanMs?.let { append("  ·  会话跨度 ${formatDuration(it)}") }
+    append("$count messages")
+    spanMs?.let { append("  ·  session span ${formatDuration(it)}") }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,9 +101,9 @@ fun TimelineScreen(
         }
     }
 
-    // 已连接或任何终态（失败/中断/关闭）都收起指示器，避免 401 时空转
+    // Collapse the indicator on connect success or any terminal state (failed/lost/closed) so a 401 doesn't spin forever
     LaunchedEffect(connectionState) {
-        if (connectionState != "连接中" && connectionState.isNotBlank()) refreshing = false
+        if (connectionState != "Connecting" && connectionState.isNotBlank()) refreshing = false
     }
     LaunchedEffect(selectedSessionId, selectedMessages?.size) {
         if (selectedSessionId != null && selectedMessages.isNullOrEmpty()) selectedSessionId = null
@@ -144,8 +144,8 @@ private fun EmptyTimeline(connectionState: String) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            if (connectionState == "已连接") "还没有消息\n\n下拉刷新可拉取最近 12 小时的历史\n或从服务器发一条测试消息"
-            else "未连接（$connectionState）\n\n请到「设置」检查配置",
+            if (connectionState == "Connected") "No messages yet\n\nPull to refresh to fetch the last 12 hours of history\nor send a test message from the server"
+            else "Not connected ($connectionState)\n\nCheck your configuration in \"Settings\"",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -222,7 +222,7 @@ private fun SessionHeader(sessionId: String, count: Int, spanMs: Long?, onBack: 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
         }
         Column(Modifier.weight(1f)) {
             Text(
@@ -319,7 +319,7 @@ private fun SwipeDeleteCard(
     )
     SwipeToDismissBox(
         state = dismissState,
-        enableDismissFromStartToEnd = false, // 只支持左滑（从右往左）
+        enableDismissFromStartToEnd = false, // swipe-left (right-to-left) only
         backgroundContent = {
             Box(
                 Modifier
@@ -330,7 +330,7 @@ private fun SwipeDeleteCard(
             ) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = "删除",
+                    contentDescription = "Delete",
                     tint = MaterialTheme.colorScheme.onErrorContainer,
                 )
             }
@@ -348,7 +348,7 @@ private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
             .clickable { onOpen() },
     ) {
         Column(Modifier.padding(12.dp)) {
-            // 头部两行：第 1 行 host + 时间徽章；第 2 行 agent · 状态，避免三者挤在一行
+            // Two header rows: row 1 = host + time badge; row 2 = agent · state, so the three don't crowd into one line
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -379,7 +379,7 @@ private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-                // 时间徽章：独占宽度，永不压缩
+                // Time badge: owns its width, never compressed
                 Surface(shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(
@@ -398,7 +398,7 @@ private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
             if (shouldShowDuration(m.stateKind, m.dur)) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "耗时 ${formatDuration(m.dur!!)}",
+                    "Duration ${formatDuration(m.dur!!)}",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -452,22 +452,22 @@ private fun MessageDetailSheet(m: MessageEntity, onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            DetailField("消息 id", m.id, mono = true)
-            DetailField("主机", m.host ?: "-")
+            DetailField("Message id", m.id, mono = true)
+            DetailField("Host", m.host ?: "-")
             DetailField("Agent", m.agent ?: "-")
-            DetailField("状态", "${m.stateKind.label}（raw: ${m.state ?: "-"}）")
-            DetailField("任务", m.task?.takeIf { it.isNotBlank() } ?: "-")
-            DetailField("详情", m.detail?.takeIf { it.isNotBlank() } ?: "-", mono = true)
-            DetailField("ntfy 时间", if (m.time > 0L) absTime(m.time) else "-")
+            DetailField("State", "${m.stateKind.label} (raw: ${m.state ?: "-"})")
+            DetailField("Task", m.task?.takeIf { it.isNotBlank() } ?: "-")
+            DetailField("Detail", m.detail?.takeIf { it.isNotBlank() } ?: "-", mono = true)
+            DetailField("ntfy time", if (m.time > 0L) absTime(m.time) else "-")
             m.ts?.takeIf { it > 0L }?.let {
-                DetailField("reporter 时钟", "${absTime(it)}（仅展示，不用于排序）")
+                DetailField("Reporter clock", "${absTime(it)} (display only, not used for sorting)")
             }
             if (shouldShowDuration(m.stateKind, m.dur)) {
-                DetailField("任务耗时", formatDuration(m.dur!!))
+                DetailField("Task duration", formatDuration(m.dur!!))
             }
-            DetailField("会话", m.session ?: "-")
+            DetailField("Session", m.session ?: "-")
             DetailField("Topic", m.topic)
-            DetailField("原始消息", m.raw ?: "-", mono = true)
+            DetailField("Raw message", m.raw ?: "-", mono = true)
 
             TextButton(
                 onClick = {
@@ -475,7 +475,7 @@ private fun MessageDetailSheet(m: MessageEntity, onDismiss: () -> Unit) {
                     onDismiss()
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("复制全部并关闭") }
+            ) { Text("Copy all and close") }
         }
     }
 }
@@ -538,7 +538,7 @@ private fun TimelineNode(
         Column(Modifier.weight(1f).padding(start = 8.dp)) {
             gapFromPrevious?.let {
                 Text(
-                    "间隔 ${formatDuration(it)}",
+                    "Gap ${formatDuration(it)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(bottom = 4.dp),
@@ -549,18 +549,18 @@ private fun TimelineNode(
     }
 }
 
-/** 详情页「复制全部」用的纯文本。 */
+/** Plain text for the detail sheet's "Copy all" button. */
 private fun MessageEntity.detailPlainText(): String = buildString {
-    appendLine("状态: ${stateKind.label} (raw: ${state ?: "-"})")
-    appendLine("ntfy 时间: ${if (time > 0L) absTime(time) else "-"}")
-    ts?.takeIf { it > 0L }?.let { appendLine("reporter 时钟: ${absTime(it)}（仅展示，不用于排序）") }
-    if (shouldShowDuration(stateKind, dur)) appendLine("任务耗时: ${formatDuration(dur!!)}")
-    appendLine("消息 id: $id")
-    appendLine("主机: ${host ?: "-"}")
+    appendLine("State: ${stateKind.label} (raw: ${state ?: "-"})")
+    appendLine("ntfy time: ${if (time > 0L) absTime(time) else "-"}")
+    ts?.takeIf { it > 0L }?.let { appendLine("Reporter clock: ${absTime(it)} (display only, not used for sorting)") }
+    if (shouldShowDuration(stateKind, dur)) appendLine("Task duration: ${formatDuration(dur!!)}")
+    appendLine("Message id: $id")
+    appendLine("Host: ${host ?: "-"}")
     appendLine("Agent: ${agent ?: "-"}")
-    task?.takeIf { it.isNotBlank() }?.let { appendLine("任务: $it") }
-    detail?.takeIf { it.isNotBlank() }?.let { appendLine("详情: $it") }
-    appendLine("会话: ${session ?: "-"}")
+    task?.takeIf { it.isNotBlank() }?.let { appendLine("Task: $it") }
+    detail?.takeIf { it.isNotBlank() }?.let { appendLine("Detail: $it") }
+    appendLine("Session: ${session ?: "-"}")
     appendLine("Topic: $topic")
-    raw?.let { appendLine("原始: $it") }
+    raw?.let { appendLine("Raw: $it") }
 }

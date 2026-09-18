@@ -11,9 +11,9 @@ class NotificationHealthTest {
         val report = diagnoseNotificationHealth(snap(alertExists = false))
         assertEquals(HealthTone.WARN, report.tone)
         assertFalse(report.canAlert)
-        assertEquals("通知渠道尚未创建", report.summary)
-        assertTrue(report.lines.any { it.text.contains("未创建") })
-        assertFalse(report.lines.any { it.text.contains("失败与等待：已关闭") })
+        assertEquals("Notification channels not yet created", report.summary)
+        assertTrue(report.lines.any { it.text.contains("not created") })
+        assertFalse(report.lines.any { it.text.contains("Failure & waiting: off") })
     }
 
     @Test
@@ -30,7 +30,7 @@ class NotificationHealthTest {
         )
         assertTrue(report.canAlert)
         assertEquals(HealthTone.OK, report.tone)
-        assertTrue(report.lines.any { it.text.contains("服务运行") && it.tone == HealthTone.OK })
+        assertTrue(report.lines.any { it.text.contains("Service running") && it.tone == HealthTone.OK })
     }
 
     @Test
@@ -40,7 +40,7 @@ class NotificationHealthTest {
         )
         assertFalse(report.canAlert)
         assertEquals(HealthTone.ERROR, report.tone)
-        assertEquals("应用通知已关闭", report.summary)
+        assertEquals("App notifications disabled", report.summary)
     }
 
     @Test
@@ -50,14 +50,14 @@ class NotificationHealthTest {
         )
         assertFalse(denied.canAlert)
         assertTrue(denied.showPermissionRequest)
-        assertTrue(denied.lines.any { it.text.contains("通知权限：未授予") })
+        assertTrue(denied.lines.any { it.text.contains("Notification permission: not granted") })
 
         val api29 = diagnoseNotificationHealth(
             snap(sdk = 29, postNotificationsGranted = null, alertExists = true, alertImportance = IMPORTANCE_HIGH)
         )
         assertTrue(api29.canAlert)
         assertFalse(api29.showPermissionRequest)
-        assertFalse(api29.lines.any { it.text.contains("通知权限") })
+        assertFalse(api29.lines.any { it.text.contains("Notification permission") })
     }
 
     @Test
@@ -67,7 +67,7 @@ class NotificationHealthTest {
         )
         assertFalse(report.canAlert)
         assertEquals(HealthTone.ERROR, report.tone)
-        assertEquals("「失败与等待」渠道已关闭", report.summary)
+        assertEquals("The \"Failure & waiting\" channel is off", report.summary)
     }
 
     @Test
@@ -83,7 +83,7 @@ class NotificationHealthTest {
             )
         )
         assertEquals(HealthTone.OK, report.tone)
-        assertTrue(report.lines.any { it.text.contains("常驻最低") && it.tone == HealthTone.OK })
+        assertTrue(report.lines.any { it.text.contains("persistent minimum") && it.tone == HealthTone.OK })
     }
 
     @Test
@@ -92,8 +92,8 @@ class NotificationHealthTest {
         assertEquals(CH_ALERT, spec.channelId)
         assertEquals("test", spec.tag)
         assertEquals(2, spec.id)
-        assertTrue(spec.title.contains("本地测试"))
-        assertTrue(spec.text.contains("不进时间线"))
+        assertTrue(spec.title.contains("local test"))
+        assertTrue(spec.text.contains("doesn't enter the timeline"))
     }
 
     private fun snap(

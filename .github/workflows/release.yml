@@ -21,7 +21,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # 用固定 release keystore 签名（GH Secrets），保证各版本之间可覆盖安装
+      # Sign with the fixed release keystore (GH Secrets) so versions can be installed over each other without uninstalling
       - name: Restore signing keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -40,7 +40,7 @@ jobs:
       - name: Build release APK
         run: gradle assembleRelease --no-daemon
 
-      # main 分支推送 → 移动 dev tag 并发布固定预发布通道（公开下载，等同 PiPilot 流程）
+      # Push to main → move the dev tag and publish the fixed prerelease channel (public download, same flow as PiPilot)
       - name: Publish to dev channel
         if: github.ref == 'refs/heads/main'
         env:
@@ -53,7 +53,7 @@ jobs:
           git push -f origin dev
           gh release delete dev --repo dilfi5h/agentping --yes --cleanup-tag 2>/dev/null || true
           gh release create dev --repo dilfi5h/agentping --title "AgentPing dev" \
-            --notes "main 分支最新构建（版本号未变更，验证用）" --prerelease AgentPing-dev.apk
+            --notes "Latest build from main (version unchanged, for verification)" --prerelease AgentPing-dev.apk
 
       - name: Rename APK
         if: startsWith(github.ref, 'refs/tags/')
@@ -65,6 +65,6 @@ jobs:
         with:
           name: AgentPing-${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
-          # verifyN tag 挂临时 prerelease，验收后删；正式 tag 出正式 release
+          # a verifyN tag carries a temporary prerelease, deleted after acceptance; a proper tag produces a proper release
           prerelease: ${{ contains(github.ref_name, 'verify') }}
           files: AgentPing-${{ github.ref_name }}.apk

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# agent-notify — AgentPing reporter v1（DESIGN.md §3.5）
-# 用法: agent-notify <started|finished|failed|waiting> [选项]
-#   --agent <name>   默认 shell
-#   --host <name>    默认 hostname -s
-#   --task <text>    摘要（≤80 字符）
-#   --detail <text>  补充（≤500 字符）
+# agent-notify — AgentPing reporter v1 (DESIGN.md §3.5)
+# Usage: agent-notify <started|finished|failed|waiting> [options]
+#   --agent <name>   defaults to shell
+#   --host <name>    defaults to hostname -s
+#   --task <text>    summary (≤80 chars)
+#   --detail <text>  extra info (≤500 chars)
 #   --session <id>
 #   --dur <ms>
-# 配置来源(优先级): 环境变量 AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf > ~/.agentping.conf
-# 行为约束: 任何自身错误 → stderr 一行 + exit 0；永不阻塞、永不影响 agent 退出码
+# Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf > ~/.agentping.conf
+# Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
 
 STATE="${1:-}"; shift 2>/dev/null || true
 AGENT="shell"
@@ -34,7 +34,7 @@ done
 [ -n "$STATE" ] || { echo "agent-notify: missing state" >&2; exit 0; }
 case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad state '$STATE'" >&2; exit 0 ;; esac
 
-# started 高频无行动价值：CLI/钩子仍可传，合法但不发布（exit 0）
+# started is frequent and carries no action value: CLI/hooks may still pass it, it's valid but not published (exit 0)
 [ "$STATE" = "started" ] && exit 0
 
 if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
@@ -47,14 +47,14 @@ fi
 [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
 [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
 
-# 优先级/emoji 映射（§3.3）；started 已在上方吞掉，此处仅 finished/failed/waiting
+# Priority/emoji mapping (§3.3); started was already swallowed above, only finished/failed/waiting here
 case "$STATE" in
-  finished) PRIO=default; TAGS="robot,white_check_mark";         LABEL="已完成" ;;
-  failed)   PRIO=high;    TAGS="robot,x";                        LABEL="失败" ;;
-  waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="等待批准" ;;
+  finished) PRIO=default; TAGS="robot,white_check_mark";         LABEL="Finished" ;;
+  failed)   PRIO=high;    TAGS="robot,x";                        LABEL="Failed" ;;
+  waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="Awaiting approval" ;;
 esac
 
-# 先截断再编码，避免转义后切在 \" 中间。${s:0:n} 在 bash 3.2 可用。
+# Clip before encoding to avoid cutting inside an escaped \". ${s:0:n} works in bash 3.2.
 clip() { printf '%s' "${1:0:$2}"; }
 HOST=$(clip "$HOST" 64)
 AGENT=$(clip "$AGENT" 32)
@@ -67,7 +67,7 @@ esac
 
 TITLE="[${HOST}] ${AGENT} ${LABEL}"
 
-# 单行 JSON：python / jq 优先；都没有才退回手工转义
+# Single-line JSON: prefer python / jq; only fall back to manual escaping when neither exists
 esc() {
   local s="$1"
   s="${s//\\/\\\\}"
@@ -125,7 +125,7 @@ print(json.dumps(f, ensure_ascii=False, separators=(",", ":")))
 JSON=$(build_json) || { echo "agent-notify: json encode failed" >&2; exit 0; }
 [ -n "$JSON" ] || { echo "agent-notify: empty json" >&2; exit 0; }
 
-# 双写总 topic（§3.3）：agentping-<host> 保留给官方 App，agentping-all 给 AgentPing
+# Double-write to the catch-all topic (§3.3): agentping-<host> is kept for the official App, agentping-all for AgentPing
 for TOPIC in "agentping-${HOST}" "agentping-all"; do
   curl -m 5 -s -o /dev/null \
     -H "Authorization: Bearer ${AGENTPING_TOKEN}" \

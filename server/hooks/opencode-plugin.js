@@ -1,20 +1,20 @@
 // AgentPing reporter plugin for OpenCode (DESIGN.md §3.6)
 // Install: ~/.config/opencode/plugins/agentping.js  (needs agent-notify + /etc/agentping.conf)
 // Event mapping:
-//   chat.message        → cache task（本轮 prompt，权威来源：output.parts）
-//   session.status(busy)→ started（reporter 可能不发布）
-//   session.idle        → finished（带 task；本 session 已推 failed 则跳过）
-//   session.error       → failed（task + 错误摘要）
-//   permission.ask      → waiting（task + 权限标题/命令）
-// finished/failed 必须带 task：否则通知正文只剩 session id。
-// 任何异常静默吞掉，绝不影响 opencode 本身。
-// 注：UserMessage 类型本身不含 parts（文本在消息事件之外），所以 task 捕获必须走
-// chat.message 的 output.parts，不能依赖 message.updated 事件载荷。
+//   chat.message        → cache task (this round's prompt; authoritative source: output.parts)
+//   session.status(busy)→ started (the reporter may not publish it)
+//   session.idle        → finished (with task; skipped if this session already pushed failed)
+//   session.error       → failed (task + error summary)
+//   permission.ask      → waiting (task + permission title/command)
+// finished/failed must carry task: otherwise the notification body is just the session id.
+// Swallow every exception silently; never affect opencode itself.
+// Note: the UserMessage type carries no parts (the text lives outside the message event), so task
+// capture must go through chat.message's output.parts, not the message.updated event payload.
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 
-// 解析 agent-notify：显式环境变量 > ~/bin（macOS 安装路径）> /usr/local/bin（Linux 安装路径）> PATH 兜底
+// Resolve agent-notify: explicit env var > ~/bin (macOS install path) > /usr/local/bin (Linux install path) > PATH fallback
 const HOME = process.env.HOME || ""
 const NOTIFY =
   [
@@ -23,8 +23,8 @@ const NOTIFY =
     "/usr/local/bin/agent-notify",
     "/opt/homebrew/bin/agent-notify",
   ].find((p) => p && existsSync(p)) || "agent-notify"
-const tasks = new Map() // sessionID → 最近一轮用户 prompt
-const failedSent = new Set() // 已推过 failed 的 sessionID
+const tasks = new Map() // sessionID → latest user prompt
+const failedSent = new Set() // sessionIDs that already pushed failed
 
 function trim(s, n) {
   return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n)
@@ -90,7 +90,7 @@ export const AgentPingPlugin = async (ctx) => {
           return
         }
         if (type === "session.idle") {
-          if (failedSent.has(sid)) return // failed 已推，避免失败后又跟一条已完成
+          if (failedSent.has(sid)) return // failed already pushed; don't follow it with a finished
           send(sid, "finished", tasks.get(sid) || "")
           return
         }

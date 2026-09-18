@@ -21,7 +21,7 @@ fi
 if [ -z "$PARSE_PY" ]; then
   PARSE_PY="$HOME/bin/agentping-zcode-hook-parse.py"
 fi
-# 追加系统路径，不前置：macOS 上 Homebrew jq/python3 必须排在 Xcode stub 前面
+# Append system paths rather than prepending: on macOS, Homebrew jq/python3 must rank ahead of the Xcode stub
 export PATH="$PATH:/usr/bin:/mingw64/bin:/bin"
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
@@ -66,7 +66,7 @@ parse() {
   return 1
 }
 
-# bash 3.2 兼容：mapfile 是 bash 4+，逐行读入数组代替
+# bash 3.2 compatibility: mapfile is bash 4+; read into an array line by line instead
 F=()
 while IFS= read -r _l || [ -n "$_l" ]; do
   F+=("$_l")

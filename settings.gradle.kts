@@ -1,5 +1,5 @@
 pluginManagement {
-    // KSP 的插件 marker 不在 aliyun gradle-plugin 镜像里，直接映射到 central 构件
+    // The KSP plugin marker isn't in the aliyun gradle-plugin mirror; map it straight to the central artifact
     resolutionStrategy {
         eachPlugin {
             if (requested.id.id == "com.google.devtools.ksp") {

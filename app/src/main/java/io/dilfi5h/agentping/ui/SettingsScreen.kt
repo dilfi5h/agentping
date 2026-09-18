@@ -68,21 +68,21 @@ fun SettingsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("设置", style = MaterialTheme.typography.titleLarge)
+        Text("Settings", style = MaterialTheme.typography.titleLarge)
 
         OutlinedTextField(
             value = server,
             onValueChange = { server = it },
-            label = { Text("服务器 URL") },
-            supportingText = { Text("自建 ntfy 地址，含 https://") },
+            label = { Text("Server URL") },
+            supportingText = { Text("Self-hosted ntfy address, including https://") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = token,
             onValueChange = { token = it },
-            label = { Text("Read Token（只读）") },
-            supportingText = { Text("tk_ 开头、仅读权限。别填发布 token（那是给服务器钩子用的，填了会 403）") },
+            label = { Text("Read Token (read-only)") },
+            supportingText = { Text("Starts with tk_, read-only. Don't paste the publish token (that's for server hooks; using it here gives a 403)") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
@@ -91,7 +91,7 @@ fun SettingsScreen(
             value = topic,
             onValueChange = { topic = it },
             label = { Text("Topic") },
-            supportingText = { Text("默认 agentping-all（总 topic）") },
+            supportingText = { Text("Defaults to agentping-all (the catch-all topic)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -100,23 +100,23 @@ fun SettingsScreen(
             Button(
                 onClick = { onSave(PingSettings(server, token, topic)) },
                 modifier = Modifier.weight(1f),
-            ) { Text("保存并连接") }
+            ) { Text("Save & connect") }
             Spacer(Modifier.width(12.dp))
             OutlinedButton(
                 onClick = onStopService,
                 modifier = Modifier.weight(1f),
-            ) { Text("停止") }
+            ) { Text("Stop") }
         }
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("连接状态", style = MaterialTheme.typography.labelMedium,
+                Text("Connection status", style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(connectionState, style = MaterialTheme.typography.bodyLarge)
                 if (!settings.configured) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "尚未配置 token。保存后 App 会以前台服务保持一条 WSS 订阅。",
+                        "No token configured yet. After saving, the App keeps one WSS subscription via a foreground service.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -125,7 +125,7 @@ fun SettingsScreen(
         }
 
         OutlinedButton(onClick = onRestartService, modifier = Modifier.fillMaxWidth()) {
-            Text("强制重连")
+            Text("Force reconnect")
         }
 
         NotificationHealthCard(
@@ -138,23 +138,24 @@ fun SettingsScreen(
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("后台保活", style = MaterialTheme.typography.titleSmall)
+                Text("Background keep-alive", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    if (batteryExempt) "✓ 电池优化：已豁免"
-                    else "✗ 电池优化：未豁免（后台连接会被系统掐断）",
+                    if (batteryExempt) "✓ Battery optimization: exempt"
+                    else "✗ Battery optimization: not exempt (the system will kill background connections)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (batteryExempt) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.error,
                 )
                 Text(
-                    "收不到后台通知时依次检查：① 下方按钮豁免电池优化；" +
-                        "② 系统设置里允许「自启动/后台运行」；③ VPN 类 App 把 AgentPing 加入分流排除" +
-                        "（VPN 隧道重连时会带走本 App 的连接）。",
+                    "If background notifications don't arrive, check in order: 1) exempt battery optimization " +
+                        "with the button below; 2) allow \"autostart / background running\" in system settings; " +
+                        "3) exclude AgentPing from VPN-style apps' split routing " +
+                        "(a VPN tunnel reconnect takes this App's connections with it).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (!batteryExempt) {
-                    Button(onClick = onRequestIgnoreBatteryOptimizations) { Text("申请忽略电池优化") }
+                    Button(onClick = onRequestIgnoreBatteryOptimizations) { Text("Request battery optimization exemption") }
                 }
             }
         }
@@ -166,7 +167,7 @@ fun SettingsScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("复制日志（$logCount 条）")
+            Text("Copy logs ($logCount entries)")
         }
 
         val version = remember {
@@ -175,7 +176,7 @@ fun SettingsScreen(
             }.getOrNull() ?: "?"
         }
         Text(
-            "AgentPing v$version · 只读推送。任何字段解析失败的消息会按纯文本展示。",
+            "AgentPing v$version · read-only push. Messages whose fields fail to parse are shown as plain text.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
@@ -192,7 +193,7 @@ private fun NotificationHealthCard(
 ) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("通知诊断", style = MaterialTheme.typography.titleSmall)
+            Text("Notification diagnostics", style = MaterialTheme.typography.titleSmall)
             Text(
                 health.summary,
                 style = MaterialTheme.typography.bodyMedium,
@@ -212,17 +213,17 @@ private fun NotificationHealthCard(
             )
             if (health.showPermissionRequest) {
                 Button(onClick = onRequestNotificationPermission, modifier = Modifier.fillMaxWidth()) {
-                    Text("申请通知权限")
+                    Text("Request notification permission")
                 }
             }
             Button(onClick = onPostLocalTest, modifier = Modifier.fillMaxWidth()) {
-                Text("发送测试通知")
+                Text("Send test notification")
             }
             OutlinedButton(onClick = onOpenAppNotificationSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("打开应用通知设置")
+                Text("Open app notification settings")
             }
             OutlinedButton(onClick = onOpenAlertChannelSettings, modifier = Modifier.fillMaxWidth()) {
-                Text("打开「失败与等待」渠道")
+                Text("Open the \"Failure & waiting\" channel")
             }
         }
     }

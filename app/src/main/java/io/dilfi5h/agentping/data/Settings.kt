@@ -21,8 +21,9 @@ data class PingSettings(
 }
 
 /**
- * 进程内单例：Activity / Service / BootReceiver 必须读同一份 flow。
- * lastNtfyId 是 ntfy 续传游标（与时间线 time 无关），存在同一 prefs 里以免升 schema。
+ * In-process singleton: Activity / Service / BootReceiver must read from the same flow.
+ * lastNtfyId is the ntfy resume cursor (unrelated to the timeline's time), stored in the same
+ * prefs to avoid bumping the schema.
  */
 class SettingsStore private constructor(app: Context) {
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -42,7 +43,7 @@ class SettingsStore private constructor(app: Context) {
             token = s.token.trim(),
             topic = s.topic.trim(),
         )
-        // commit：第一次保存立刻拉起 Service 时，另一条路径读 disk 也能看到 token
+        // commit: when the Service is started right after the first save, another path reading from disk also sees the token
         prefs.edit()
             .putString("serverUrl", stored.serverUrl)
             .putString("token", stored.token)

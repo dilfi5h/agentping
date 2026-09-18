@@ -1,10 +1,10 @@
-// AgentPing reporter for pi（DESIGN.md §3.6）
-// 安装: ~/.pi/agent/extensions/agentping.js（需先装好 agent-notify + /etc/agentping.conf）
-// 事件映射:
-//   before_agent_start → started（task = 用户 prompt 片段；reporter 可能不发布 started）
-//   agent_end(stopReason=error) → failed（detail=错误原文，task=本轮 prompt）
-//   agent_settled → finished（pi 不再自动续跑时才算完成；若本 run 已推 failed 则跳过；task=本轮 prompt）
-// task 必须挂在 finished/failed 上：started 可能被 reporter 吞掉，否则通知只剩 session id
+// AgentPing reporter for pi (DESIGN.md §3.6)
+// Install: ~/.pi/agent/extensions/agentping.js (requires agent-notify + /etc/agentping.conf first)
+// Event mapping:
+//   before_agent_start → started (task = snippet of the user prompt; the reporter may not publish started)
+//   agent_end(stopReason=error) → failed (detail=error text, task=this round's prompt)
+//   agent_settled → finished (counts as done only when pi stops auto-continuing; skipped if this run already pushed failed; task=this round's prompt)
+// task must ride on finished/failed: started may be swallowed by the reporter, otherwise the notification is just a session id
 
 import { existsSync } from "node:fs"
 
@@ -49,7 +49,7 @@ export default function (pi) {
   })
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (failedThisRun) return // failed 已推，避免失败后又跟一条已完成
+    if (failedThisRun) return // failed already pushed; don't follow it with a finished
     send(ctx, "finished", { "--task": taskThisRun })
   })
 }

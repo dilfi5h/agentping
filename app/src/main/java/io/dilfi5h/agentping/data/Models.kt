@@ -5,8 +5,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
- * AgentPing v1 载荷（DESIGN.md §3.2）。App 侧宽松：字段缺失/类型不符按默认值，
- * 整体解析失败时上层降级为纯文本渲染。
+ * AgentPing v1 payload (DESIGN.md §3.2). Lenient on the App side: missing fields / type
+ * mismatches fall back to defaults; on a full parse failure the caller degrades to plain text.
  */
 @Serializable
 data class PingPayload(
@@ -24,11 +24,11 @@ data class PingPayload(
 }
 
 enum class StateKind(val raw: String, val label: String) {
-    STARTED("started", "开始运行"),
-    FINISHED("finished", "已完成"),
-    FAILED("failed", "失败"),
-    WAITING("waiting", "等待批准"),
-    UNKNOWN("unknown", "未知");
+    STARTED("started", "Started"),
+    FINISHED("finished", "Finished"),
+    FAILED("failed", "Failed"),
+    WAITING("waiting", "Awaiting approval"),
+    UNKNOWN("unknown", "Unknown");
 
     companion object {
         fun from(raw: String): StateKind =
@@ -36,7 +36,7 @@ enum class StateKind(val raw: String, val label: String) {
     }
 }
 
-/** ntfy JSON stream 的 message 帧（只取需要的字段，open/keepalive 帧直接忽略）。 */
+/** The message frame of the ntfy JSON stream (only fields we need; open/keepalive frames are ignored). */
 @Serializable
 data class NtfyFrame(
     val id: String = "",
@@ -54,7 +54,7 @@ fun parseFrame(line: String): NtfyFrame? = runCatching {
     frameJson.decodeFromString<NtfyFrame>(line)
 }.getOrNull()
 
-/** message 字段按 PingPayload 解析；失败返回 null，调用方降级纯文本。 */
+/** Parses the message field as PingPayload; returns null on failure so the caller degrades to plain text. */
 fun parsePayload(raw: String?): PingPayload? =
     raw?.trim()?.takeIf { it.startsWith("{") }?.let {
         runCatching { frameJson.decodeFromString<PingPayload>(it) }.getOrNull()

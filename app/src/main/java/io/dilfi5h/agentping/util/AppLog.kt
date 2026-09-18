@@ -6,8 +6,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 进程内环形日志（内存，最多 600 条），供设置页"复制日志"导出排障。
- * 注意：任何调用点都不得写入 token 等敏感值。
+ * In-process ring buffer log (in memory, capped at 600 entries), exported via the settings
+ * page's "copy logs" button for troubleshooting.
+ * Note: no call site may write sensitive values such as tokens.
  */
 object AppLog {
     private const val CAP = 600

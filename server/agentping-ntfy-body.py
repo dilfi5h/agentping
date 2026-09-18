@@ -6,9 +6,9 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LABELS = {
-    "finished": "已完成",
-    "failed": "失败",
-    "waiting": "等待批准",
+    "finished": "Finished",
+    "failed": "Failed",
+    "waiting": "Awaiting approval",
 }
 
 # Keep well under ZCode hook timeoutMs (20s). Two topics in parallel.

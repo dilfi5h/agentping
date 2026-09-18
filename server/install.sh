@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# AgentPing Linux 服务器侧一键安装（reporter 部分；ntfy 服务端见 DESIGN.md §5）
-# 用法: sudo ./install.sh
-# 做的事: 装 agent-notify → /usr/local/bin；/etc/agentping.conf 不存在则提示手工填 token；
-#         部署 pi / opencode / zcode 钩子到 *调用 sudo 的用户* 家目录（不是 root 的 ~）。
-# 主机名覆盖: 在 /etc/agentping.conf 里加 AGENTPING_HOST=<name>（容器等场景）
+# AgentPing one-shot server-side installer for Linux (reporter part; for the ntfy server see DESIGN.md §5)
+# Usage: sudo ./install.sh
+# What it does: installs agent-notify → /usr/local/bin; if /etc/agentping.conf is missing, prompts to fill in the token manually;
+#               deploys pi / opencode / zcode hooks into the home dir of the *user running sudo* (not root's ~).
+# Hostname override: add AGENTPING_HOST=<name> to /etc/agentping.conf (containers etc.)
 #
-# Windows/Git Bash 请用同目录 ./install-win.sh（不要用本脚本）。
+# On Windows/Git Bash use ./install-win.sh in the same directory (do not use this script).
 set -e
 cd "$(dirname "$0")"
 
@@ -16,7 +16,7 @@ case "$(uname -s 2>/dev/null || echo unknown)" in
     ;;
 esac
 
-# sudo 时插件必须落到 SUDO_USER 的 home，而不是 /root
+# Under sudo, plugins must land in SUDO_USER's home, not /root
 INSTALL_USER=""
 USER_HOME="$HOME"
 if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
@@ -30,7 +30,7 @@ if [ -n "$INSTALL_USER" ]; then
   INSTALL_GROUP=$(id -gn "$INSTALL_USER" 2>/dev/null || true)
 fi
 
-# 系统二进制归 root；用户侧文件用 install -o 落到 SUDO_USER，避免 ~/.pi 变成 root 所有
+# System binaries belong to root; user-side files use install -o to land in SUDO_USER's hands, so ~/.pi doesn't become root-owned
 install_user() {
   local mode="$1" src="$2" dest="$3" dir d
   dir=$(dirname "$dest")
@@ -41,7 +41,7 @@ install_user() {
     else
       install -m "$mode" -o "$INSTALL_USER" "$src" "$dest"
     fi
-    # mkdir -p 可能沿途建了 .pi / .pi/agent 等，不能只改叶子目录属主
+    # mkdir -p may have created .pi / .pi/agent etc. along the way; fixing only the leaf directory's owner isn't enough
     d="$dir"
     while [ -n "$d" ] && [ "$d" != "/" ] && [ "$d" != "$USER_HOME" ]; do
       chown "$INSTALL_USER${INSTALL_GROUP:+:$INSTALL_GROUP}" "$d" 2>/dev/null || true
@@ -56,7 +56,7 @@ install -m 755 agent-notify /usr/local/bin/agent-notify
 echo "installed: /usr/local/bin/agent-notify"
 
 if [ ! -f /etc/agentping.conf ]; then
-  echo "!! 手工创建 /etc/agentping.conf（chmod 600）:"
+  echo "!! Create /etc/agentping.conf manually (chmod 600):"
   echo "   AGENTPING_URL=https://ntfy.example.com"
   echo "   AGENTPING_TOKEN=<publish token>"
   echo "   # optional: see etc-agentping.conf.example"
@@ -147,4 +147,4 @@ echo "     into: $USER_HOME/.zcode/cli/config.json  (set hooks.enabled=true)"
 echo "  2) Reopen ZCode session"
 echo "  3) Test: agent-notify finished --agent zcode --task hello"
 
-echo "done. 测试: agent-notify finished --task hello  （started 合法但不发布）"
+echo "done. Test: agent-notify finished --task hello  (started is valid but not published)"

@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
             AgentPingTheme { App(timeline) }
         }
 
-        // 已配置就直接拉起服务；配置保存后由 App 回调重启
+        // Already configured: start the service right away; after settings are saved the App restarts it via callback
         if (settings.flow.value.configured) PingService.start(this)
         refreshHealth()
     }
@@ -101,13 +101,13 @@ class MainActivity : ComponentActivity() {
                         selected = tab == 0,
                         onClick = { tab = 0 },
                         icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                        label = { Text("时间线") },
+                        label = { Text("Timeline") },
                     )
                     NavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
                         icon = { Icon(Icons.Filled.Settings, null) },
-                        label = { Text("设置") },
+                        label = { Text("Settings") },
                     )
                 }
             },

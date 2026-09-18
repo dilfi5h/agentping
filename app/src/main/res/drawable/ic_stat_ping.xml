@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 通知小图标：Σ 剪影（须纯白 alpha，着色由系统完成） -->
+<!-- Small notification icon: Σ silhouette (must be pure white alpha; tinting is done by the system) -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"

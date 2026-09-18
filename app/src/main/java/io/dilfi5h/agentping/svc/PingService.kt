@@ -45,7 +45,7 @@ class PingService : Service() {
     private val kick = MutableStateFlow(0)
     private var loopJob: kotlinx.coroutines.Job? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    /** 当前连接（续传/实时模式）内已逐条通知的消息数，超出部分进摘要。 */
+    /** Number of messages already notified one-by-one within the current connection (resume/real-time mode); the rest are merged into a summary. */
     private val resumeCount = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onCreate() {
@@ -61,7 +61,7 @@ class PingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         AppLog.log("SVC", "onStartCommand action=${intent?.action ?: "null"} startId=$startId")
         startAsForeground()
-        // 幂等：重复 start 不叠加循环；reload/refresh（配置变更或下拉刷新）取消旧循环重开
+        // Idempotent: repeated starts don't stack loops; reload/refresh (config change or pull-to-refresh) cancels the old loop and restarts
         if (intent?.action == ACTION_REFRESH) sinceOverride.value = SINCE_BACKFILL
         val reload = intent?.action == ACTION_RELOAD || intent?.action == ACTION_REFRESH
         if (reload) {
@@ -77,7 +77,7 @@ class PingService : Service() {
     override fun onBind(intent: Intent?) = null
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 用户划掉任务卡时，部分 ROM 会连前台服务一起杀；1 秒后拉起重建
+        // When the user swipes the task away, some ROMs kill the foreground service too; restart after 1s
         AppLog.log("SVC", "onTaskRemoved -> scheduling restart")
         val restart = Intent(applicationContext, PingService::class.java)
         val pi = PendingIntent.getForegroundService(
@@ -101,7 +101,7 @@ class PingService : Service() {
     private fun startAsForeground() {
         val n = NotificationCompat.Builder(this, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_stat_ping)
-            .setContentTitle("AgentPing 运行中")
+            .setContentTitle("AgentPing running")
             .setContentText(connectionState.value)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -110,21 +110,21 @@ class PingService : Service() {
         startForeground(NOTIF_SERVICE, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
     }
 
-    /** 订阅主循环：指数退避重连；open 成功后重置；网络恢复 kick 立即重试。 */
+    /** Main subscription loop: reconnect with exponential backoff; reset after a successful open; retry immediately when the network comes back (kick). */
     private suspend fun runLoop() {
         var backoff = 1000L
         var seenKick = kick.value
         while (scope.isActive) {
             val cfg = settings.flow.first { it.configured }
-            // 优先级：下拉刷新强制回放 > 已处理的 ntfy 游标（断线续传） > 首次连接回放 12h 缓存
+            // Priority: forced replay from pull-to-refresh > processed ntfy cursor (resume after disconnect) > replay 12h cache on first connect
             val forced = sinceOverride.value
             if (forced != null) sinceOverride.value = null
             val since = forced ?: settings.lastNtfyId() ?: db.dao().lastId() ?: SINCE_BACKFILL
-            // 回放模式 = 重装首连/下拉刷新的 12h 历史回放，只进时间线不通知；
-            // 断线续传（lastId）补回的是断连期间的真消息，必须照常通知
+            // Backfill mode = 12h history replay on first connect after reinstall / pull-to-refresh, timeline only without notifying;
+            // resume after a disconnect (lastId) recovers real messages from the outage and must notify as usual
             val backfill = since == SINCE_BACKFILL
             resumeCount.set(0)
-            onConnState("连接中")
+            onConnState("Connecting")
             AppLog.log("LOOP", "connecting since=$since backfill=$backfill backoff=${backoff}ms")
             val opened = stream.connectOnce(cfg, since, backfill).let {
                 it is io.dilfi5h.agentping.net.StreamEnd.Closed && it.opened
@@ -132,7 +132,7 @@ class PingService : Service() {
             AppLog.log("LOOP", "ended opened=$opened net=${netState()}")
             if (opened) { backoff = 1000L; continue }
             updateServiceNotification()
-            // 退避等待；期间网络恢复（kick 计数变化）则立即重试且不累加退避
+            // Backoff wait; if the network comes back during it (kick counter changes), retry immediately without growing the backoff
             val kicked = withTimeoutOrNull(backoff) { kick.first { it != seenKick } } != null
             if (kicked) { AppLog.log("LOOP", "kick: retry now"); seenKick = kick.value }
             else { AppLog.log("LOOP", "backoff -> ${backoff * 2}ms"); backoff = (backoff * 2).coerceAtMost(60_000L) }
@@ -162,18 +162,18 @@ class PingService : Service() {
             settings.rememberNtfyId(entity.id)
             return
         }
-        val rowId = db.dao().insert(entity) // ntfy id 幂等，重复消息 IGNORE 返回 -1
+        val rowId = db.dao().insert(entity) // ntfy id is idempotent; a duplicate returns -1 via IGNORE
         settings.rememberNtfyId(entity.id)
         if (rowId == -1L) {
             AppLog.log("DB", "dup id=${entity.id}")
             return
         }
-        // 回放（重装首连/下拉刷新）只进时间线；断线续传照常通知，超出上限的合并为摘要防洪水；
-        // 实时消息（连接打开后发布，按服务器 Date 头对齐）不受上限约束
+        // Backfill (first connect after reinstall / pull-to-refresh) only fills the timeline; resume still notifies, and anything over the cap is merged into a summary to prevent flooding;
+        // real-time messages (published after the connection opened, aligned by the server's Date header) are not subject to the cap
         if (stream.backfillMode) {
             AppLog.log("NOTIF", "backfill id=${entity.id}, timeline only (no notify)")
         } else if (entity.stateKind == io.dilfi5h.agentping.data.StateKind.STARTED) {
-            notifyMessage(entity) // started 高频无行动价值，内部直接转时间线
+            notifyMessage(entity) // started events are frequent and carry no action value; handled internally as timeline-only
         } else if (entity.time >= stream.openServerTimeMillis) {
             notifyMessage(entity)
         } else {
@@ -188,15 +188,15 @@ class PingService : Service() {
     }
 
     private suspend fun pruneOld() {
-        // cache-duration 12h，本地历史略长：留 3 天
+        // cache-duration is 12h, keep local history slightly longer: 3 days
         db.dao().prune(System.currentTimeMillis() - 3 * 24 * 3600_000L)
         db.deletedDao().prune(System.currentTimeMillis() - 2 * 24 * 3600_000L)
     }
 
-    // ---- 通知 ----
+    // ---- Notifications ----
 
     private fun notifyMessage(m: MessageEntity) {
-        // 开始运行只进时间线，不发通知（高频且无行动价值）
+        // "Started" only goes to the timeline, no notification (frequent and no action value)
         if (m.stateKind == io.dilfi5h.agentping.data.StateKind.STARTED) {
             AppLog.log("NOTIF", "started -> timeline only, no notification")
             return
@@ -219,7 +219,7 @@ class PingService : Service() {
             )
             .build()
         try {
-            // POST_NOTIFICATIONS 被拒时 notify() 不抛异常而是静默丢弃，这里显式记录
+            // When POST_NOTIFICATIONS is denied, notify() doesn't throw but silently drops it; log it explicitly here
             if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -228,25 +228,25 @@ class PingService : Service() {
             }
             AppLog.log("NOTIF", "post ${if (alert) "alert" else "status"}: $title")
             val nm = getSystemService(NotificationManager::class.java)
-            // 创建时读的 importance 不可信（系统自动静默后可能仍返回原值），发通知时再读一次
+            // importance read at creation time is unreliable (after the system auto-silences, it may still return the original value); re-read when posting
             val imp = nm.getNotificationChannel(if (alert) CH_ALERT else CH_STATUS)?.importance ?: -1
             AppLog.log("NOTIF", "channel ${if (alert) CH_ALERT else CH_STATUS} importance=$imp")
             nm.notify(NOTIF_TAG_MSG, m.id.hashCode(), n)
         } catch (e: SecurityException) {
             AppLog.log("NOTIF", "no permission: ${e.message}")
-            // POST_NOTIFICATIONS 未授予：消息仍在时间线里
+            // POST_NOTIFICATIONS not granted: the message is still in the timeline
         }
     }
 
     private fun notifySummary(m: MessageEntity, extra: Int) {
-        // 断线时间长时补回消息可能上百条，逐条通知会再次触发系统对渠道的"自动静默"降级；
-        // 超出上限的合并到一条摘要里，随每条更早消息滚动更新计数
+        // After a long outage, hundreds of messages may be recovered; notifying one by one would re-trigger the system's "auto-silence" downgrade of the channel;
+        // everything over the cap is merged into one summary whose count updates as more older messages arrive
         val title = m.title ?: "[${m.host ?: "?"}] ${m.agent ?: "shell"} ${m.stateKind.label}"
         val text = listOfNotNull(m.task, m.detail).joinToString("\n").ifBlank { m.raw ?: "" }
         val n = NotificationCompat.Builder(this, CH_ALERT)
             .setSmallIcon(R.drawable.ic_stat_ping)
-            .setContentTitle("AgentPing 漏掉的消息")
-            .setContentText("最新：$title（等 $extra 条更早消息，点击打开查看）")
+            .setContentTitle("AgentPing missed messages")
+            .setContentText("Latest: $title (plus $extra earlier messages, tap to open)")
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
             .setContentIntent(mainIntent())
@@ -266,14 +266,14 @@ class PingService : Service() {
     private fun buildServiceNotification(): Notification =
         NotificationCompat.Builder(this, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_stat_ping)
-            .setContentTitle("AgentPing 运行中")
+            .setContentTitle("AgentPing running")
             .setContentText(connectionState.value)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setContentIntent(mainIntent())
             .build()
 
-    // ---- 连接状态（UI 与前台通知共用）----
+    // ---- Connection state (shared by UI and foreground notification) ----
 
     private fun onConnState(s: String) {
         AppLog.log("STATE", s)
@@ -285,7 +285,7 @@ class PingService : Service() {
         val cm = getSystemService(ConnectivityManager::class.java)
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                kick.value += 1 // 网络恢复，立即尝试重连
+                kick.value += 1 // network is back, retry immediately
             }
         }
         networkCallback = cb
@@ -305,7 +305,7 @@ class PingService : Service() {
         }
     }
 
-    /** 活跃网络画像（vpn/wifi/cell），连接失败时与 VPN 重连时间点对照用。 */
+    /** Active network profile (vpn/wifi/cell), used to correlate with VPN reconnect timestamps when connections fail. */
     private fun netState(): String {
         val cm = getSystemService(ConnectivityManager::class.java)
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return "none"
@@ -328,27 +328,27 @@ class PingService : Service() {
         const val CH_SERVICE = io.dilfi5h.agentping.notify.CH_SERVICE
         const val NOTIF_SERVICE = 1
         const val NOTIF_SUMMARY = 3
-        /** 与 FGS/摘要通知分开放，避免 hashCode 撞上 1/3 覆盖常驻通知。 */
+        /** Kept separate from the FGS/summary notification ids to avoid hashCode collisions overwriting the persistent notification at 1/3. */
         const val NOTIF_TAG_MSG = "msg"
         const val NOTIF_TAG_SUMMARY = "summary"
 
-        /** 断线续传单次连接内逐条通知的上限，超出部分合并摘要。 */
+        /** Per-connection cap on one-by-one notifications during resume; the rest are merged into a summary. */
         const val RESUME_NOTIFY_CAP = 10
 
-        /** UI 直读的连接状态文本。 */
-        val connectionState = MutableStateFlow("未连接")
+        /** Connection state text read directly by the UI. */
+        val connectionState = MutableStateFlow("Disconnected")
 
         fun start(ctx: Context) {
             ctx.startForegroundService(Intent(ctx, PingService::class.java))
         }
 
-        /** 配置变更后调用：取消旧连接循环，立即按新配置重连。 */
+        /** Call after a config change: cancel the old connection loop and reconnect immediately with the new config. */
         fun reload(ctx: Context) {
             val i = Intent(ctx, PingService::class.java).setAction(ACTION_RELOAD)
             ctx.startForegroundService(i)
         }
 
-        /** 下拉刷新：重连并回放最近缓存（since=12h），补齐装包前/断线期间的消息。 */
+        /** Pull-to-refresh: reconnect and replay the recent cache (since=12h) to fill in messages from before install / during the outage. */
         fun refresh(ctx: Context) {
             val i = Intent(ctx, PingService::class.java).setAction(ACTION_REFRESH)
             ctx.startForegroundService(i)
@@ -356,29 +356,29 @@ class PingService : Service() {
 
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, PingService::class.java))
-            connectionState.value = "未连接"
+            connectionState.value = "Disconnected"
         }
 
         fun ensureChannels(ctx: Context) {
             val nm = ctx.getSystemService(NotificationManager::class.java)
-            // 旧渠道 ID 作废：系统"自动静默"降级无法用代码改回，换新 ID 强制重置。
-            // -v2 也被 09-12 的测试灌水重新触发了降级，升级到 -v3；续传 10 条上限+摘要防再次触发
+            // Old channel ids are retired: the system's "auto-silence" downgrade can't be reverted from code, so use new ids to force a reset.
+            // -v2 was also re-triggered by the 09-12 test flooding; bumping to -v3; resume cap of 10 + summary to prevent another trigger
             for (old in listOf("status", "alert", "service", "status-v2", "alert-v2", "service-v2")) {
                 nm.deleteNotificationChannel(old)
             }
             nm.createNotificationChannel(
-                NotificationChannel(CH_STATUS, "任务状态", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                NotificationChannel(CH_STATUS, "Task status", NotificationManager.IMPORTANCE_DEFAULT).apply {
                     setSound(null, null)
                     enableVibration(false)
                 }
             )
             nm.createNotificationChannel(
-                NotificationChannel(CH_ALERT, "失败与等待", NotificationManager.IMPORTANCE_HIGH).apply {
+                NotificationChannel(CH_ALERT, "Failure & waiting", NotificationManager.IMPORTANCE_HIGH).apply {
                     enableVibration(true)
                 }
             )
             nm.createNotificationChannel(
-                NotificationChannel(CH_SERVICE, "服务运行", NotificationManager.IMPORTANCE_MIN).apply {
+                NotificationChannel(CH_SERVICE, "Service running", NotificationManager.IMPORTANCE_MIN).apply {
                     setSound(null, null)
                     enableVibration(false)
                 }
@@ -390,7 +390,7 @@ class PingService : Service() {
             }
         }
 
-        /** 绕过 ntfy/Room/游标，只验证失败与等待渠道是否真能弹出。 */
+        /** Bypasses ntfy/Room/cursor, only verifying that the failure & waiting channel can really pop. */
         fun postLocalTest(ctx: Context) {
             ensureChannels(ctx)
             val spec = localTestNotifySpec()

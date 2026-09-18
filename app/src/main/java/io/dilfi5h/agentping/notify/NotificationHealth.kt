@@ -1,8 +1,9 @@
 package io.dilfi5h.agentping.notify
 
 /**
- * 通知诊断的纯 Kotlin 层：Android API 读成 snapshot 后再映射成文案。
- * 系统自动静默 / OEM 自启动无法可靠查询，禁止做成绿灯。
+ * Pure-Kotlin layer of notification diagnostics: Android APIs are read into a snapshot,
+ * then mapped to human-readable text.
+ * System auto-silencing / OEM autostart cannot be queried reliably — never report them as green.
  */
 data class ChannelSnap(
     val id: String,
@@ -73,8 +74,8 @@ fun localTestNotifySpec(): LocalTestNotifySpec = LocalTestNotifySpec(
     channelId = CH_ALERT,
     tag = NOTIF_TAG_TEST,
     id = NOTIF_TEST,
-    title = "AgentPing 本地测试",
-    text = "这条通知不进时间线、不改游标。能看到它，说明失败与等待渠道可用。",
+    title = "AgentPing local test",
+    text = "This notification doesn't enter the timeline or move the cursor. If you can see it, the failure & waiting channel works.",
 )
 
 fun diagnoseNotificationHealth(snap: NotificationHealthSnap): NotificationHealthReport {
@@ -86,16 +87,16 @@ fun diagnoseNotificationHealth(snap: NotificationHealthSnap): NotificationHealth
     val lines = buildList {
         if (snap.sdk >= 33) {
             add(
-                if (permissionDenied) HealthLine("✗ 通知权限：未授予（系统会静默丢弃）", HealthTone.ERROR)
-                else HealthLine("✓ 通知权限：已授予", HealthTone.OK),
+                if (permissionDenied) HealthLine("✗ Notification permission: not granted (the system silently drops)", HealthTone.ERROR)
+                else HealthLine("✓ Notification permission: granted", HealthTone.OK),
             )
         }
         add(
-            if (snap.appNotificationsEnabled) HealthLine("✓ 应用通知：已开启", HealthTone.OK)
-            else HealthLine("✗ 应用通知：已关闭", HealthTone.ERROR),
+            if (snap.appNotificationsEnabled) HealthLine("✓ App notifications: enabled", HealthTone.OK)
+            else HealthLine("✗ App notifications: disabled", HealthTone.ERROR),
         )
         if (snap.notificationsPaused) {
-            add(HealthLine("✗ 通知已暂时暂停", HealthTone.ERROR))
+            add(HealthLine("✗ Notifications temporarily paused", HealthTone.ERROR))
         }
         add(alertLine(alert, snap.alert.importance))
         add(statusLine(status, snap.status.importance))
@@ -117,20 +118,20 @@ fun diagnoseNotificationHealth(snap: NotificationHealthSnap): NotificationHealth
     }
 
     val summary = when {
-        permissionDenied -> "通知权限未授予"
-        !snap.appNotificationsEnabled -> "应用通知已关闭"
-        snap.notificationsPaused -> "通知已暂时暂停"
-        alert == ChannelHealth.BLOCKED -> "「失败与等待」渠道已关闭"
-        alert == ChannelHealth.NOT_CREATED -> "通知渠道尚未创建"
-        alert != ChannelHealth.HIGH -> "「失败与等待」可能被系统降级"
-        else -> "通知权限与渠道看起来正常"
+        permissionDenied -> "Notification permission not granted"
+        !snap.appNotificationsEnabled -> "App notifications disabled"
+        snap.notificationsPaused -> "Notifications temporarily paused"
+        alert == ChannelHealth.BLOCKED -> "The \"Failure & waiting\" channel is off"
+        alert == ChannelHealth.NOT_CREATED -> "Notification channels not yet created"
+        alert != ChannelHealth.HIGH -> "\"Failure & waiting\" may have been downgraded by the system"
+        else -> "Notification permission and channels look fine"
     }
 
     val hint = when {
-        !canAlert -> "先打开权限和「失败与等待」渠道，再点测试。"
+        !canAlert -> "Grant the permission and turn on the \"Failure & waiting\" channel first, then tap test."
         tone == HealthTone.WARN && alert == ChannelHealth.NOT_CREATED ->
-            "点「发送测试通知」会创建渠道。系统自动静默 API 看不出来，请以测试结果为准。"
-        else -> "系统自动静默 API 看不出来，请点测试确认横幅是否出现。"
+            "Tapping \"Send test notification\" creates the channels. The system's auto-silencing is invisible to the API — trust the test result."
+        else -> "The system's auto-silencing is invisible to the API; tap test to confirm the banner appears."
     }
 
     return NotificationHealthReport(
@@ -145,39 +146,39 @@ fun diagnoseNotificationHealth(snap: NotificationHealthSnap): NotificationHealth
 
 private fun alertLine(health: ChannelHealth, importance: Int?): HealthLine = when (health) {
     ChannelHealth.NOT_CREATED ->
-        HealthLine("○ 失败与等待：未创建（服务尚未启动）", HealthTone.WARN)
+        HealthLine("○ Failure & waiting: not created (service hasn't started yet)", HealthTone.WARN)
     ChannelHealth.BLOCKED ->
-        HealthLine("✗ 失败与等待：已关闭", HealthTone.ERROR)
+        HealthLine("✗ Failure & waiting: off", HealthTone.ERROR)
     ChannelHealth.HIGH ->
-        HealthLine("✓ 失败与等待：高（失败/等待会横幅）", HealthTone.OK)
+        HealthLine("✓ Failure & waiting: high (failures/waiting show a banner)", HealthTone.OK)
     else ->
-        HealthLine("! 失败与等待：importance=${importance ?: -1}（可能被系统降级，横幅/声音不可信）", HealthTone.WARN)
+        HealthLine("! Failure & waiting: importance=${importance ?: -1} (may be downgraded by the system; banner/sound unreliable)", HealthTone.WARN)
 }
 
 private fun statusLine(health: ChannelHealth, importance: Int?): HealthLine = when (health) {
     ChannelHealth.NOT_CREATED ->
-        HealthLine("○ 任务状态：未创建（默认无声，不是故障）", HealthTone.WARN)
+        HealthLine("○ Task status: not created (silent by default, not a fault)", HealthTone.WARN)
     ChannelHealth.BLOCKED ->
-        HealthLine("✗ 任务状态：已关闭（完成通知不会出现）", HealthTone.ERROR)
+        HealthLine("✗ Task status: off (completion notifications won't appear)", HealthTone.ERROR)
     else ->
-        HealthLine("✓ 任务状态：${importanceLabel(importance)}（默认无声）", HealthTone.OK)
+        HealthLine("✓ Task status: ${importanceLabel(importance)} (silent by default)", HealthTone.OK)
 }
 
 private fun serviceLine(health: ChannelHealth, importance: Int?): HealthLine = when (health) {
     ChannelHealth.NOT_CREATED ->
-        HealthLine("○ 服务运行：未创建（常驻通知最低重要性，不是故障）", HealthTone.WARN)
+        HealthLine("○ Service running: not created (min importance for the persistent notification, not a fault)", HealthTone.WARN)
     ChannelHealth.BLOCKED ->
-        HealthLine("✗ 服务运行：已关闭（不影响任务通知）", HealthTone.ERROR)
+        HealthLine("✗ Service running: off (doesn't affect task notifications)", HealthTone.ERROR)
     else ->
-        HealthLine("✓ 服务运行：${importanceLabel(importance)}（常驻最低，可关）", HealthTone.OK)
+        HealthLine("✓ Service running: ${importanceLabel(importance)} (persistent minimum, can be off)", HealthTone.OK)
 }
 
 private fun importanceLabel(importance: Int?): String = when (importance) {
-    IMPORTANCE_NONE -> "已关闭"
-    IMPORTANCE_MIN -> "最低"
-    IMPORTANCE_LOW -> "低"
-    IMPORTANCE_DEFAULT -> "默认"
-    IMPORTANCE_HIGH -> "高"
-    IMPORTANCE_MAX -> "最高"
+    IMPORTANCE_NONE -> "Off"
+    IMPORTANCE_MIN -> "Min"
+    IMPORTANCE_LOW -> "Low"
+    IMPORTANCE_DEFAULT -> "Default"
+    IMPORTANCE_HIGH -> "High"
+    IMPORTANCE_MAX -> "Max"
     else -> "importance=${importance ?: -1}"
 }
