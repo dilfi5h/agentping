@@ -23,13 +23,13 @@ Installer coverage for the shipped agents. ✅ = install script drops the hook; 
 
 | Agent \\ OS | Linux<br>`install.sh` | macOS<br>`install-macos.sh` | Windows<br>`install-win.sh` |
 |---|:---:|:---:|:---:|
-| **pi** | ✅ | ✅ | ❌ |
-| **opencode** | ✅ | ✅ | ❌ |
+| **pi** | ✅ | ✅ | ✅ |
+| **opencode** | ✅ | ✅ | ✅ |
 
 Notes:
 
 - Claude Code / Codex / Gemini CLI are in the protocol (`agent` field) but **not shipped** yet.
-- Windows can still use pi / opencode if you copy `server/hooks/pi-extension.js` / `opencode-plugin.js` by hand; `install-win.sh` just doesn't do it yet.
+- Windows hooks call Git Bash to run the bash reporter (Node cannot spawn `.sh` scripts directly on Windows).
 
 Current release: [v0.0.11](https://github.com/dilfi5h/agentping/releases/tag/v0.0.11)
 
@@ -72,7 +72,7 @@ The install scripts are per-platform — **don't mix them**:
 | Platform | Command | Installs to |
 |---|---|---|
 | Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi / opencode hooks (into `SUDO_USER`'s home, not root's `~`) |
-| Windows (Git Bash) | `./install-win.sh` | `~/bin/agent-notify` + python publish helper |
+| Windows (Git Bash) | `./install-win.sh` | `~/bin/agent-notify` + python publish helper + pi / opencode hooks |
 | macOS | `./install-macos.sh` | `~/bin/agent-notify` + pi / opencode hooks |
 
 ### Linux
@@ -111,7 +111,16 @@ Installs:
 
 - `~/bin/agent-notify` (from `agent-notify.win`)
 - `~/bin/agentping-ntfy-body.py` (publishes UTF-8 JSON, avoiding Windows curl's mojibake with non-ASCII Titles)
+- `~/bin/agent-notify.cmd` (Win32 launcher via Git Bash)
+- `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
+- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
 - A `~/.agentping.conf` template if no config exists
+
+If OpenCode Desktop doesn't auto-load `~/.config/opencode/plugins/`, add this to `~/.config/opencode/opencode.jsonc` and reopen OpenCode:
+
+```jsonc
+"plugin": ["./plugins/agentping.js"]
+```
 
 ### macOS
 

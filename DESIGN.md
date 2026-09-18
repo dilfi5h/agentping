@@ -148,9 +148,9 @@ started: a legal state, hooks may keep calling; the reporter exits 0 silently wi
 
 | Agent | Trigger | Event → state mapping |
 |---|---|---|
-| **pi** | extension `~/.pi/agent/extensions/agentping.js` (✅ shipped and device-verified 2026-09-12; API: `before_agent_start`/`agent_end`/`agent_settled`, calls agent-notify via `pi.exec`) | `before_agent_start`→started (task=prompt snippet; the reporter may not publish it), caches this round's task; `agent_end`(stopReason=error)→failed (task+detail=error text); `agent_settled`→finished (task=this round's prompt; skipped if this run already pushed failed). **finished/failed must carry task**, otherwise once started is swallowed the notification body is just the session id |
+| **pi** | extension `~/.pi/agent/extensions/agentping.js` (✅ shipped and device-verified 2026-09-12; API: `before_agent_start`/`agent_end`/`agent_settled`, calls agent-notify via `pi.exec`; on Windows `pi.exec` runs Git Bash with the script path because Node cannot spawn bash scripts directly) | `before_agent_start`→started (task=prompt snippet; the reporter may not publish it), caches this round's task; `agent_end`(stopReason=error)→failed (task+detail=error text); `agent_settled`→finished (task=this round's prompt; skipped if this run already pushed failed). **finished/failed must carry task**, otherwise once started is swallowed the notification body is just the session id |
 | **Claude Code** | hooks in `~/.claude/settings.json` | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting (CC routes permission reminders through this event) |
-| **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ shipped and device-verified 2026-09-16, v1.18.31; hooks: `chat.message`/`event`/`permission.ask`, spawns agent-notify) | `chat.message`→cache task (the text lives in `output.parts`, **not** in the `message.updated` payload); `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task; skipped if failed was pushed); `session.error`→failed (task+detail); `permission.ask`→waiting (title+metadata.command) |
+| **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ shipped and device-verified 2026-09-16, v1.18.31; hooks: `chat.message`/`event`/`permission.ask`, spawns agent-notify; on Windows spawns Git Bash with the script path for the same reason) | `chat.message`→cache task (the text lives in `output.parts`, **not** in the `message.updated` payload); `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task; skipped if failed was pushed); `session.error`→failed (task+detail); `permission.ask`→waiting (title+metadata.command) |
 | **Codex** | `notify` in `~/.codex/config.toml` | agent-start/agent-end JSON args → started/finished |
 | **OpenCode / Gemini CLI** | plugin / hooks (check current-version docs at kickoff) | Same-shape mapping |
 | **Everything else** (L2 fallback) | `agentping run -- <cmd>` | launch→started; exit 0→finished(dur), non-zero→failed(dur, detail=stderr tail) |
@@ -205,7 +205,7 @@ agentping/
 │   ├── agent-notify.cmd.example  ← optional Win32 launcher example
 │   ├── etc-agentping.conf.example
 │   ├── install.sh                ← Linux: /usr/local/bin + pi extension
-│   ├── install-win.sh            ← Windows: ~/bin reporter
+│   ├── install-win.sh            ← Windows: ~/bin reporter + pi / opencode hooks (hooks spawn via Git Bash)
 │   ├── install-macos.sh          ← macOS: ~/bin + pi / opencode hooks (reuses the Linux reporter)
 │   └── hooks/
 │       ├── pi-extension.js

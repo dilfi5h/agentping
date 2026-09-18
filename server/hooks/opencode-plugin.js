@@ -10,19 +10,37 @@
 // Swallow every exception silently; never affect opencode itself.
 // Note: the UserMessage type carries no parts (the text lives outside the message event), so task
 // capture must go through chat.message's output.parts, not the message.updated event payload.
+// Windows: Node spawn cannot run the bash reporter directly (ENOENT), so call Git Bash with the script path.
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
+import { homedir } from "node:os"
 
-// Resolve agent-notify: explicit env var > ~/bin (macOS install path) > /usr/local/bin (Linux install path) > PATH fallback
-const HOME = process.env.HOME || ""
+// Resolve agent-notify: explicit env var > ~/bin (macOS/Windows install path) > /usr/local/bin (Linux) > PATH fallback
+const HOME = process.env.HOME || process.env.USERPROFILE || homedir() || ""
+
+function firstExisting(paths) {
+  return paths.find((p) => p && existsSync(p)) || ""
+}
+
 const NOTIFY =
-  [
+  firstExisting([
     process.env.AGENTPING_NOTIFY,
     HOME + "/bin/agent-notify",
+    HOME + "\\bin\\agent-notify",
     "/usr/local/bin/agent-notify",
     "/opt/homebrew/bin/agent-notify",
-  ].find((p) => p && existsSync(p)) || "agent-notify"
+  ]) || "agent-notify"
+
+const GIT_BASH =
+  process.platform === "win32"
+    ? firstExisting([
+        process.env.AGENTPING_BASH,
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+      ])
+    : ""
+
 const tasks = new Map() // sessionID → latest user prompt
 const failedSent = new Set() // sessionIDs that already pushed failed
 
@@ -36,7 +54,18 @@ function send(sessionID, state, task, detail) {
     if (sessionID) args.push("--session", String(sessionID))
     if (task) args.push("--task", String(task))
     if (detail) args.push("--detail", String(detail))
-    const child = spawn(NOTIFY, args, { stdio: "ignore", detached: true })
+    // On Windows, detached spawn of a bash script fails with ENOENT; drive via Git Bash instead.
+    let child
+    if (GIT_BASH && NOTIFY !== "agent-notify") {
+      const script = String(NOTIFY).replaceAll("\\", "/")
+      child = spawn(GIT_BASH, [script, ...args], {
+        stdio: "ignore",
+        detached: true,
+        windowsHide: true,
+      })
+    } else {
+      child = spawn(NOTIFY, args, { stdio: "ignore", detached: true })
+    }
     child.on("error", () => {})
     child.unref()
   } catch {}

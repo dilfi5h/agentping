@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# AgentPing Windows/Git Bash installer (reporter)
+# AgentPing Windows/Git Bash installer (reporter + pi / opencode hooks)
 # Usage (from repo server/ directory):
 #   ./install-win.sh
 #   ./install-win.sh --host win
 # Does NOT touch Linux paths (/usr/local/bin, /etc).
+# Hooks call Git Bash to run the bash reporter (Node spawn cannot exec bash scripts on Windows).
 set -e
 cd "$(dirname "$0")"
 
@@ -26,19 +27,52 @@ else
   exit 1
 fi
 
+if [ ! -x "/c/Program Files/Git/bin/bash.exe" ] && [ ! -x "/c/Program Files (x86)/Git/bin/bash.exe" ]; then
+  echo "!! Git Bash not found under Program Files; hooks need it to spawn agent-notify" >&2
+  echo "   Install Git for Windows, or set AGENTPING_BASH to bash.exe" >&2
+fi
+
 BIN_DIR="${HOME}/bin"
 mkdir -p "$BIN_DIR"
 
 install -m 755 agent-notify.win "$BIN_DIR/agent-notify"
 install -m 644 agentping-ntfy-body.py "$BIN_DIR/agentping-ntfy-body.py"
 if [ -f agent-notify.cmd.example ]; then
-  # optional helper; keep example name unless user already has one
-  if [ ! -f "$BIN_DIR/agent-notify.cmd" ]; then
-    install -m 644 agent-notify.cmd.example "$BIN_DIR/agent-notify.cmd"
-  fi
+  install -m 644 agent-notify.cmd.example "$BIN_DIR/agent-notify.cmd"
 fi
 echo "installed: $BIN_DIR/agent-notify"
 echo "installed: $BIN_DIR/agentping-ntfy-body.py"
+echo "installed: $BIN_DIR/agent-notify.cmd"
+
+mkdir -p "$HOME/.pi/agent/extensions"
+install -m 644 hooks/pi-extension.js "$HOME/.pi/agent/extensions/agentping.js"
+echo "installed: $HOME/.pi/agent/extensions/agentping.js"
+
+mkdir -p "$HOME/.config/opencode/plugins"
+install -m 644 hooks/opencode-plugin.js "$HOME/.config/opencode/plugins/agentping.js"
+echo "installed: $HOME/.config/opencode/plugins/agentping.js"
+
+# OpenCode loads plugins as ESM; ensure package.json declares module type when we create/patch it.
+OC_PKG="$HOME/.config/opencode/package.json"
+if [ ! -f "$OC_PKG" ]; then
+  printf '{\n  "type": "module",\n  "dependencies": {\n    "@opencode-ai/plugin": "1.18.31"\n  }\n}\n' > "$OC_PKG"
+  echo "installed: $OC_PKG"
+elif command -v python >/dev/null 2>&1; then
+  python - "$OC_PKG" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+if data.get("type") != "module":
+    data["type"] = "module"
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    print(f"updated: {path} (type=module)")
+else:
+    print(f"keep existing: {path}")
+PY
+fi
 
 CONF="${HOME}/.agentping.conf"
 if [ ! -f "$CONF" ]; then
@@ -67,4 +101,15 @@ else
   fi
 fi
 
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) echo "note: $BIN_DIR is not on PATH; add it to your shell profile (for manual agent-notify tests)" ;;
+esac
+
+echo
+echo "OpenCode plugin load (if Desktop doesn't pick up ~/.config/opencode/plugins automatically):"
+echo "  add to ~/.config/opencode/opencode.jsonc :"
+echo '    "plugin": ["./plugins/agentping.js"]'
+echo "  then reopen OpenCode."
+echo
 echo "done."
