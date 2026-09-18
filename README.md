@@ -21,7 +21,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | zcode 钩子（Linux / Windows / macOS，bash 3.2 兼容） | ✅ |
 | Claude Code 钩子 | 未接 |
 
-当前正式版：[v0.0.7](https://github.com/dilfi5h/agentping/releases/tag/v0.0.7)
+当前正式版：[v0.0.9](https://github.com/dilfi5h/agentping/releases/tag/v0.0.9)
 
 ## 下载 App
 
@@ -36,7 +36,7 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | Token | **只读** token（App 永远不要放写 token） |
 | Topic | 默认 `agentping-all` |
 
-首次安装请打开通知权限；建议在系统设置里给 AgentPing 电池优化白名单，避免后台 WebSocket 被掐。
+首次安装请打开通知权限；建议在系统设置里给 AgentPing 电池优化白名单，避免后台 WebSocket 被掐。收不到通知时到设置页看「通知诊断」，可发一条本地测试通知（不进时间线）。
 
 ## 它做什么 / 不做什么
 

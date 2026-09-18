@@ -23,6 +23,7 @@ import io.dilfi5h.agentping.data.SettingsStore
 import io.dilfi5h.agentping.data.parsePayload
 import io.dilfi5h.agentping.data.MessageEntity
 import io.dilfi5h.agentping.net.NtfyStream
+import io.dilfi5h.agentping.notify.localTestNotifySpec
 import io.dilfi5h.agentping.util.AppLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +54,7 @@ class PingService : Service() {
         settings = SettingsStore.get(this)
         db = AppDatabase.get(this)
         stream = NtfyStream(scope, ::onFrame, ::onConnState)
-        createChannels()
+        ensureChannels(this)
         registerNetworkCallback()
     }
 
@@ -194,37 +195,6 @@ class PingService : Service() {
 
     // ---- 通知 ----
 
-    private fun createChannels() {
-        val nm = getSystemService(NotificationManager::class.java)
-        // 旧渠道 ID 作废：系统"自动静默"降级无法用代码改回，换新 ID 强制重置。
-        // -v2 也被 09-12 的测试灌水重新触发了降级，升级到 -v3；续传 10 条上限+摘要防再次触发
-        for (old in listOf("status", "alert", "service", "status-v2", "alert-v2", "service-v2")) {
-            nm.deleteNotificationChannel(old)
-        }
-        nm.createNotificationChannel(
-            NotificationChannel(CH_STATUS, "任务状态", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                setSound(null, null)
-                enableVibration(false)
-            }
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(CH_ALERT, "失败与等待", NotificationManager.IMPORTANCE_HIGH).apply {
-                enableVibration(true)
-            }
-        )
-        nm.createNotificationChannel(
-            NotificationChannel(CH_SERVICE, "服务运行", NotificationManager.IMPORTANCE_MIN).apply {
-                setSound(null, null)
-                enableVibration(false)
-            }
-        )
-        for (id in listOf(CH_STATUS, CH_ALERT, CH_SERVICE)) {
-            nm.getNotificationChannel(id)?.let {
-                AppLog.log("NOTIF", "channel $id importance=${it.importance}")
-            }
-        }
-    }
-
     private fun notifyMessage(m: MessageEntity) {
         // 开始运行只进时间线，不发通知（高频且无行动价值）
         if (m.stateKind == io.dilfi5h.agentping.data.StateKind.STARTED) {
@@ -353,9 +323,9 @@ class PingService : Service() {
     )
 
     companion object {
-        const val CH_STATUS = "status-v3"
-        const val CH_ALERT = "alert-v3"
-        const val CH_SERVICE = "service-v3"
+        const val CH_STATUS = io.dilfi5h.agentping.notify.CH_STATUS
+        const val CH_ALERT = io.dilfi5h.agentping.notify.CH_ALERT
+        const val CH_SERVICE = io.dilfi5h.agentping.notify.CH_SERVICE
         const val NOTIF_SERVICE = 1
         const val NOTIF_SUMMARY = 3
         /** 与 FGS/摘要通知分开放，避免 hashCode 撞上 1/3 覆盖常驻通知。 */
@@ -387,6 +357,67 @@ class PingService : Service() {
         fun stop(ctx: Context) {
             ctx.stopService(Intent(ctx, PingService::class.java))
             connectionState.value = "未连接"
+        }
+
+        fun ensureChannels(ctx: Context) {
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            // 旧渠道 ID 作废：系统"自动静默"降级无法用代码改回，换新 ID 强制重置。
+            // -v2 也被 09-12 的测试灌水重新触发了降级，升级到 -v3；续传 10 条上限+摘要防再次触发
+            for (old in listOf("status", "alert", "service", "status-v2", "alert-v2", "service-v2")) {
+                nm.deleteNotificationChannel(old)
+            }
+            nm.createNotificationChannel(
+                NotificationChannel(CH_STATUS, "任务状态", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(CH_ALERT, "失败与等待", NotificationManager.IMPORTANCE_HIGH).apply {
+                    enableVibration(true)
+                }
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(CH_SERVICE, "服务运行", NotificationManager.IMPORTANCE_MIN).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+            )
+            for (id in listOf(CH_STATUS, CH_ALERT, CH_SERVICE)) {
+                nm.getNotificationChannel(id)?.let {
+                    AppLog.log("NOTIF", "channel $id importance=${it.importance}")
+                }
+            }
+        }
+
+        /** 绕过 ntfy/Room/游标，只验证失败与等待渠道是否真能弹出。 */
+        fun postLocalTest(ctx: Context) {
+            ensureChannels(ctx)
+            val spec = localTestNotifySpec()
+            val n = NotificationCompat.Builder(ctx, spec.channelId)
+                .setSmallIcon(R.drawable.ic_stat_ping)
+                .setContentTitle(spec.title)
+                .setContentText(spec.text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(spec.text))
+                .setAutoCancel(true)
+                .setContentIntent(
+                    PendingIntent.getActivity(
+                        ctx, 0, Intent(ctx, MainActivity::class.java),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                    )
+                )
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .build()
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                AppLog.log("NOTIF", "!! POST_NOTIFICATIONS not granted, system will drop this")
+            }
+            val nm = ctx.getSystemService(NotificationManager::class.java)
+            val imp = nm.getNotificationChannel(spec.channelId)?.importance ?: -1
+            AppLog.log("NOTIF", "post test channel=${spec.channelId} importance=$imp")
+            nm.notify(spec.tag, spec.id, n)
         }
 
         const val ACTION_RELOAD = "io.dilfi5h.agentping.RELOAD"

@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Card
@@ -72,6 +74,11 @@ private val CST_FORMAT = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
     .withZone(ZoneId.of("Asia/Shanghai"))
 
 fun absTime(ms: Long): String = CST_FORMAT.format(Instant.ofEpochMilli(ms))
+
+private fun sessionCountLabel(count: Int, spanMs: Long?): String = buildString {
+    append("$count 条消息")
+    spanMs?.let { append("  ·  会话跨度 ${formatDuration(it)}") }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,22 +190,31 @@ private fun SessionTimeline(
     onDelete: (String) -> Unit,
     onOpen: (MessageEntity) -> Unit,
 ) {
+    val chrono = remember(messages) { chronological(messages) }
+    val gaps = remember(chrono) { gapsFromPrevious(chrono) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "session-header") {
-            SessionHeader(sessionId, messages.size, onBack)
+            SessionHeader(sessionId, chrono.size, sessionSpanMs(chrono), onBack)
         }
-        items(messages, key = { it.id }) { message ->
-            SwipeDeleteCard(message, onDelete, onOpen = { onOpen(message) })
+        items(chrono.size, key = { chrono[it].id }) { index ->
+            TimelineNode(
+                message = chrono[index],
+                gapFromPrevious = gaps[index],
+                isFirst = index == 0,
+                isLast = index == chrono.lastIndex,
+                onDelete = onDelete,
+                onOpen = { onOpen(chrono[index]) },
+            )
         }
     }
 }
 
 @Composable
-private fun SessionHeader(sessionId: String, count: Int, onBack: () -> Unit) {
+private fun SessionHeader(sessionId: String, count: Int, spanMs: Long?, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -217,7 +233,7 @@ private fun SessionHeader(sessionId: String, count: Int, onBack: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "$count 条消息",
+                sessionCountLabel(count, spanMs),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -244,7 +260,7 @@ private fun SessionGroupCard(group: TimelineEntry.SessionGroup, onOpen: (String)
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "${group.messages.size} 条消息  ·  ${latest.stateKind.label}",
+                        "${sessionCountLabel(group.messages.size, sessionSpanMs(group.messages))}  ·  ${latest.stateKind.label}",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = stateColor(latest.stateKind),
@@ -379,6 +395,14 @@ private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
                 Spacer(Modifier.height(4.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium)
             }
+            if (shouldShowDuration(m.stateKind, m.dur)) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "耗时 ${formatDuration(m.dur!!)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             m.detail?.takeIf { it.isNotBlank() }?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -428,11 +452,19 @@ private fun MessageDetailSheet(m: MessageEntity, onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            DetailField("消息 id", m.id, mono = true)
             DetailField("主机", m.host ?: "-")
             DetailField("Agent", m.agent ?: "-")
             DetailField("状态", "${m.stateKind.label}（raw: ${m.state ?: "-"}）")
             DetailField("任务", m.task?.takeIf { it.isNotBlank() } ?: "-")
             DetailField("详情", m.detail?.takeIf { it.isNotBlank() } ?: "-", mono = true)
+            DetailField("ntfy 时间", if (m.time > 0L) absTime(m.time) else "-")
+            m.ts?.takeIf { it > 0L }?.let {
+                DetailField("reporter 时钟", "${absTime(it)}（仅展示，不用于排序）")
+            }
+            if (shouldShowDuration(m.stateKind, m.dur)) {
+                DetailField("任务耗时", formatDuration(m.dur!!))
+            }
             DetailField("会话", m.session ?: "-")
             DetailField("Topic", m.topic)
             DetailField("原始消息", m.raw ?: "-", mono = true)
@@ -466,10 +498,64 @@ private fun DetailField(label: String, value: String, mono: Boolean = false) {
     }
 }
 
+@Composable
+private fun TimelineNode(
+    message: MessageEntity,
+    gapFromPrevious: Long?,
+    isFirst: Boolean,
+    isLast: Boolean,
+    onDelete: (String) -> Unit,
+    onOpen: () -> Unit,
+) {
+    Row(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.width(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier
+                    .width(2.dp)
+                    .height(if (isFirst) 8.dp else 16.dp)
+                    .background(
+                        if (isFirst) Color.Transparent
+                        else MaterialTheme.colorScheme.outlineVariant,
+                    )
+            )
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .background(stateColor(message.stateKind), CircleShape)
+            )
+            if (!isLast) {
+                Box(
+                    Modifier
+                        .width(2.dp)
+                        .height(48.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
+            }
+        }
+        Column(Modifier.weight(1f).padding(start = 8.dp)) {
+            gapFromPrevious?.let {
+                Text(
+                    "间隔 ${formatDuration(it)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            SwipeDeleteCard(message, onDelete, onOpen)
+        }
+    }
+}
+
 /** 详情页「复制全部」用的纯文本。 */
 private fun MessageEntity.detailPlainText(): String = buildString {
     appendLine("状态: ${stateKind.label} (raw: ${state ?: "-"})")
-    appendLine("时间: ${absTime(time)}")
+    appendLine("ntfy 时间: ${if (time > 0L) absTime(time) else "-"}")
+    ts?.takeIf { it > 0L }?.let { appendLine("reporter 时钟: ${absTime(it)}（仅展示，不用于排序）") }
+    if (shouldShowDuration(stateKind, dur)) appendLine("任务耗时: ${formatDuration(dur!!)}")
+    appendLine("消息 id: $id")
     appendLine("主机: ${host ?: "-"}")
     appendLine("Agent: ${agent ?: "-"}")
     task?.takeIf { it.isNotBlank() }?.let { appendLine("任务: $it") }

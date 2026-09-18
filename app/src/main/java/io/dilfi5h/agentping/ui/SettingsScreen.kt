@@ -2,7 +2,7 @@ package io.dilfi5h.agentping.ui
 
 import android.content.Intent
 import android.net.Uri
-import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,26 +26,40 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.dilfi5h.agentping.data.PingSettings
+import io.dilfi5h.agentping.notify.CH_ALERT
+import io.dilfi5h.agentping.notify.HealthTone
+import io.dilfi5h.agentping.notify.NotificationHealthReport
 import io.dilfi5h.agentping.util.AppLog
 
 @Composable
 fun SettingsScreen(
     settings: PingSettings,
     connectionState: String,
+    health: NotificationHealthReport,
+    batteryExempt: Boolean,
+    logCount: Int,
     onSave: (PingSettings) -> Unit,
     onRestartService: () -> Unit,
     onStopService: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onPostLocalTest: () -> Unit,
+    onOpenAppNotificationSettings: () -> Unit,
+    onOpenAlertChannelSettings: () -> Unit,
+    onRequestIgnoreBatteryOptimizations: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var server by remember(settings) { mutableStateOf(settings.serverUrl) }
     var token by remember(settings) { mutableStateOf(settings.token) }
     var topic by remember(settings) { mutableStateOf(settings.topic) }
+    val ctx = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
     Column(
         modifier
@@ -114,18 +128,22 @@ fun SettingsScreen(
             Text("强制重连")
         }
 
-        // 后台保活：电池优化状态常显（豁免与否一目了然）
-        val ctx = LocalContext.current
-        val pm = ctx.getSystemService(PowerManager::class.java)
-        val exempt = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+        NotificationHealthCard(
+            health = health,
+            onRequestNotificationPermission = onRequestNotificationPermission,
+            onPostLocalTest = onPostLocalTest,
+            onOpenAppNotificationSettings = onOpenAppNotificationSettings,
+            onOpenAlertChannelSettings = onOpenAlertChannelSettings,
+        )
+
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("后台保活", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    if (exempt) "✓ 电池优化：已豁免"
+                    if (batteryExempt) "✓ 电池优化：已豁免"
                     else "✗ 电池优化：未豁免（后台连接会被系统掐断）",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (exempt) MaterialTheme.colorScheme.primary
+                    color = if (batteryExempt) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.error,
                 )
                 Text(
@@ -135,20 +153,12 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (!exempt) {
-                    Button(onClick = {
-                        ctx.startActivity(
-                            Intent(
-                                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                                Uri.parse("package:${ctx.packageName}")
-                            )
-                        )
-                    }) { Text("申请忽略电池优化") }
+                if (!batteryExempt) {
+                    Button(onClick = onRequestIgnoreBatteryOptimizations) { Text("申请忽略电池优化") }
                 }
             }
         }
 
-        val clipboard = LocalClipboardManager.current
         OutlinedButton(
             onClick = {
                 AppLog.log("UI", "log copied (${AppLog.size()} lines)")
@@ -156,7 +166,7 @@ fun SettingsScreen(
             },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("复制日志（${AppLog.size()} 条）")
+            Text("复制日志（$logCount 条）")
         }
 
         val version = remember {
@@ -171,3 +181,71 @@ fun SettingsScreen(
         )
     }
 }
+
+@Composable
+private fun NotificationHealthCard(
+    health: NotificationHealthReport,
+    onRequestNotificationPermission: () -> Unit,
+    onPostLocalTest: () -> Unit,
+    onOpenAppNotificationSettings: () -> Unit,
+    onOpenAlertChannelSettings: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("通知诊断", style = MaterialTheme.typography.titleSmall)
+            Text(
+                health.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = healthToneColor(health.tone),
+            )
+            health.lines.forEach { line ->
+                Text(
+                    line.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = healthToneColor(line.tone),
+                )
+            }
+            Text(
+                health.hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (health.showPermissionRequest) {
+                Button(onClick = onRequestNotificationPermission, modifier = Modifier.fillMaxWidth()) {
+                    Text("申请通知权限")
+                }
+            }
+            Button(onClick = onPostLocalTest, modifier = Modifier.fillMaxWidth()) {
+                Text("发送测试通知")
+            }
+            OutlinedButton(onClick = onOpenAppNotificationSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("打开应用通知设置")
+            }
+            OutlinedButton(onClick = onOpenAlertChannelSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("打开「失败与等待」渠道")
+            }
+        }
+    }
+}
+
+@Composable
+private fun healthToneColor(tone: HealthTone): Color = when (tone) {
+    HealthTone.OK -> MaterialTheme.colorScheme.primary
+    HealthTone.WARN -> MaterialTheme.colorScheme.tertiary
+    HealthTone.ERROR -> MaterialTheme.colorScheme.error
+}
+
+fun appNotificationSettingsIntent(packageName: String): Intent =
+    Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+
+fun alertChannelSettingsIntent(packageName: String): Intent =
+    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+        .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        .putExtra(Settings.EXTRA_CHANNEL_ID, CH_ALERT)
+
+fun appDetailsIntent(packageName: String): Intent =
+    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+
+fun ignoreBatteryOptimizationsIntent(packageName: String): Intent =
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))

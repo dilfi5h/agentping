@@ -1,8 +1,11 @@
 package io.dilfi5h.agentping
 
 import android.Manifest
+import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,11 +28,22 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import io.dilfi5h.agentping.data.AppDatabase
 import io.dilfi5h.agentping.data.SettingsStore
+import io.dilfi5h.agentping.notify.CH_ALERT
+import io.dilfi5h.agentping.notify.CH_SERVICE
+import io.dilfi5h.agentping.notify.CH_STATUS
+import io.dilfi5h.agentping.notify.ChannelSnap
+import io.dilfi5h.agentping.notify.NotificationHealthSnap
+import io.dilfi5h.agentping.notify.diagnoseNotificationHealth
 import io.dilfi5h.agentping.svc.PingService
 import io.dilfi5h.agentping.ui.AgentPingTheme
 import io.dilfi5h.agentping.ui.SettingsScreen
 import io.dilfi5h.agentping.ui.TimelineScreen
+import io.dilfi5h.agentping.ui.alertChannelSettingsIntent
+import io.dilfi5h.agentping.ui.appDetailsIntent
+import io.dilfi5h.agentping.ui.appNotificationSettingsIntent
+import io.dilfi5h.agentping.ui.ignoreBatteryOptimizationsIntent
 import io.dilfi5h.agentping.util.AppLog
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,9 +51,13 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private lateinit var settings: SettingsStore
+    private val healthTick = MutableStateFlow(0)
 
     private val notifPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            AppLog.log("UI", "POST_NOTIFICATIONS granted=$it")
+            refreshHealth()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,6 +74,12 @@ class MainActivity : ComponentActivity() {
 
         // 已配置就直接拉起服务；配置保存后由 App 回调重启
         if (settings.flow.value.configured) PingService.start(this)
+        refreshHealth()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshHealth()
     }
 
     @Composable
@@ -64,6 +88,11 @@ class MainActivity : ComponentActivity() {
         val settingsState by settings.flow.collectAsState()
         val conn by PingService.connectionState.collectAsState()
         val messages by timeline.collectAsState()
+        val tick by healthTick.collectAsState()
+        val health = remember(tick) { diagnoseNotificationHealth(readNotificationHealth()) }
+        val batteryExempt = remember(tick) {
+            getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
+        }
 
         Scaffold(
             bottomBar = {
@@ -103,6 +132,9 @@ class MainActivity : ComponentActivity() {
                 SettingsScreen(
                     settings = settingsState,
                     connectionState = conn,
+                    health = health,
+                    batteryExempt = batteryExempt,
+                    logCount = AppLog.size(),
                     onSave = {
                         AppLog.log("UI", "settings saved topic=${it.topic} url=${it.serverUrl}")
                         settings.save(it)
@@ -115,9 +147,70 @@ class MainActivity : ComponentActivity() {
                         PingService.start(this)
                     },
                     onStopService = { AppLog.log("UI", "manual stop"); PingService.stop(this) },
+                    onRequestNotificationPermission = {
+                        if (Build.VERSION.SDK_INT >= 33) {
+                            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    },
+                    onPostLocalTest = {
+                        AppLog.log("UI", "local test notification")
+                        PingService.postLocalTest(this)
+                        refreshHealth()
+                    },
+                    onOpenAppNotificationSettings = {
+                        openSettingsOrDetails(appNotificationSettingsIntent(packageName))
+                    },
+                    onOpenAlertChannelSettings = {
+                        openSettingsOrDetails(alertChannelSettingsIntent(packageName))
+                    },
+                    onRequestIgnoreBatteryOptimizations = {
+                        startActivity(ignoreBatteryOptimizationsIntent(packageName))
+                    },
                     modifier = Modifier.padding(pad),
                 )
             }
+        }
+    }
+
+    private fun refreshHealth() {
+        healthTick.value += 1
+    }
+
+    private fun readNotificationHealth(): NotificationHealthSnap {
+        val nm = getSystemService(NotificationManager::class.java)
+        val granted = if (Build.VERSION.SDK_INT >= 33) {
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else null
+        AppLog.log(
+            "HEALTH",
+            "enabled=${nm.areNotificationsEnabled()} paused=${nm.areNotificationsPaused()} " +
+                "perm=${granted ?: "n/a"} " +
+                "alert=${nm.getNotificationChannel(CH_ALERT)?.importance ?: -1} " +
+                "status=${nm.getNotificationChannel(CH_STATUS)?.importance ?: -1} " +
+                "service=${nm.getNotificationChannel(CH_SERVICE)?.importance ?: -1}",
+        )
+        return NotificationHealthSnap(
+            sdk = Build.VERSION.SDK_INT,
+            postNotificationsGranted = granted,
+            appNotificationsEnabled = nm.areNotificationsEnabled(),
+            notificationsPaused = nm.areNotificationsPaused(),
+            status = channelSnap(nm, CH_STATUS),
+            alert = channelSnap(nm, CH_ALERT),
+            service = channelSnap(nm, CH_SERVICE),
+        )
+    }
+
+    private fun channelSnap(nm: NotificationManager, id: String): ChannelSnap {
+        val channel = nm.getNotificationChannel(id)
+        return ChannelSnap(id = id, exists = channel != null, importance = channel?.importance)
+    }
+
+    private fun openSettingsOrDetails(intent: android.content.Intent) {
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            startActivity(appDetailsIntent(packageName))
         }
     }
 }
