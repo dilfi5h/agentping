@@ -1,5 +1,7 @@
 // AgentPing reporter for pi (DESIGN.md §3.6)
-// Install: ~/.pi/agent/extensions/agentping.js (requires agent-notify + /etc/agentping.conf first)
+// Install: ~/.pi/agent/extensions/agentping.js
+// Requires agent-notify on PATH (or ~/bin|/usr/local/bin|/opt/homebrew/bin)
+// plus /etc/agentping.conf or ~/.agentping.conf
 // Event mapping:
 //   before_agent_start → started (task = snippet of the user prompt; the reporter may not publish started)
 //   agent_end(stopReason=error) → failed (detail=error text, task=this round's prompt)

@@ -11,7 +11,7 @@ LABELS = {
     "waiting": "Awaiting approval",
 }
 
-# Keep well under ZCode hook timeoutMs (20s). Two topics in parallel.
+# Keep publish snappy so agent hooks aren't blocked. Two topics in parallel.
 PUBLISH_TIMEOUT_SEC = 2.0
 
 

@@ -16,9 +16,20 @@ agent(hook) → agent-notify → ntfy → AgentPing App
 | ntfy message bus | ✅ |
 | `agent-notify` reporter (Linux / Windows / macOS) | ✅ |
 | Android App (timeline / notifications / resume) | ✅ |
-| pi hook | ✅ |
-| opencode plugin | ✅ |
-| zcode hook (Linux / Windows / macOS, bash 3.2 compatible) | ✅ |
+
+### OS × Agent hook matrix
+
+Installer coverage for the shipped agents. ✅ = install script drops the hook; ❌ = not wired by that platform's installer yet.
+
+| Agent \\ OS | Linux<br>`install.sh` | macOS<br>`install-macos.sh` | Windows<br>`install-win.sh` |
+|---|:---:|:---:|:---:|
+| **pi** | ✅ | ✅ | ❌ |
+| **opencode** | ✅ | ✅ | ❌ |
+
+Notes:
+
+- Claude Code / Codex / Gemini CLI are in the protocol (`agent` field) but **not shipped** yet.
+- Windows can still use pi / opencode if you copy `server/hooks/pi-extension.js` / `opencode-plugin.js` by hand; `install-win.sh` just doesn't do it yet.
 
 Current release: [v0.0.11](https://github.com/dilfi5h/agentping/releases/tag/v0.0.11)
 
@@ -60,9 +71,9 @@ The install scripts are per-platform — **don't mix them**:
 
 | Platform | Command | Installs to |
 |---|---|---|
-| Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi / opencode / zcode hooks (into `SUDO_USER`'s home, not root's `~`) |
-| Windows (Git Bash) | `./install-win.sh` | `~/bin/agent-notify` + python publish helper + zcode hook files |
-| macOS | `./install-macos.sh` | `~/bin/agent-notify` + zcode hook files |
+| Linux | `sudo ./install.sh` | `/usr/local/bin/agent-notify` + pi / opencode hooks (into `SUDO_USER`'s home, not root's `~`) |
+| Windows (Git Bash) | `./install-win.sh` | `~/bin/agent-notify` + python publish helper |
+| macOS | `./install-macos.sh` | `~/bin/agent-notify` + pi / opencode hooks |
 
 ### Linux
 
@@ -76,7 +87,6 @@ Installs (under `sudo`, plugins go to the caller's home, not `/root`):
 - `/usr/local/bin/agent-notify` (Linux curl version)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
 - `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
-- `~/bin/agentping-zcode-hook` + snippet (same as macOS; must be merged manually into `~/.zcode/cli/config.json`)
 
 If `/etc/agentping.conf` is missing, create it as prompted (`chmod 600`):
 
@@ -95,44 +105,33 @@ Dependencies: Git Bash, `python`, access to your ntfy.
 # in the repo's server/ directory
 ./install-win.sh
 # optional: ./install-win.sh --host win
-# optional: ./install-win.sh --skip-zcode   # reporter only
 ```
 
 Installs:
 
 - `~/bin/agent-notify` (from `agent-notify.win`)
 - `~/bin/agentping-ntfy-body.py` (publishes UTF-8 JSON, avoiding Windows curl's mojibake with non-ASCII Titles)
-- `~/bin/agentping-zcode-hook` + generated snippet (unless `--skip-zcode`)
-- `~/bin/agentping-zcode-hook-parse.py` (stdin JSON parsing backend for the hook; not needed when `jq` is available)
 - A `~/.agentping.conf` template if no config exists
 
-Then **manually merge** the generated `~/bin/agentping-zcode-snippet.json` into `~/.zcode/cli/config.json` (must set `hooks.enabled: true`), and reopen the ZCode session.
-
 ### macOS
-
-Dependencies: the system's bash 3.2 is enough to run the hook; either `jq` or `python3` on PATH (used by the hook to parse stdin JSON; probed in order `jq` → `python3` → `python`; if none exists the hook skips silently without affecting the agent).
 
 ```bash
 # in the repo's server/ directory
 ./install-macos.sh
 # optional: ./install-macos.sh --host mac
-# optional: ./install-macos.sh --skip-zcode   # reporter only
 ```
 
 Installs:
 
 - `~/bin/agent-notify` (Linux curl version, works as-is on macOS)
-- `~/bin/agentping-zcode-hook` + generated snippet (unless `--skip-zcode`)
-- `~/bin/agentping-zcode-hook-parse.py` (stdin JSON parsing backend for the hook; not needed when `jq` is available)
+- `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
 - `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
 - A `~/.agentping.conf` template if no config exists (`chmod 600`)
-
-Then **manually merge** the generated `~/bin/agentping-zcode-snippet.json` into `~/.zcode/cli/config.json` (must set `hooks.enabled: true`; hook type is `process`: `command=/bin/bash` + absolute script path), and reopen the ZCode session.
 
 ### Quick self-test
 
 ```bash
-agent-notify finished --agent zcode --task hello
+agent-notify finished --agent pi --task hello
 # started is valid but not published
 agent-notify started --task ignored
 ```
@@ -157,9 +156,8 @@ Any internal error still `exit 0`s — it never drags the agent down.
 |---|---|---|
 | **pi** | `~/.pi/agent/extensions/agentping.js` | `before_agent_start`→started (may be swallowed); `agent_settled`→finished (carries this round's task); errors→failed (task+detail) |
 | **opencode** | `~/.config/opencode/plugins/agentping.js` (global plugin dir) | `chat.message`→caches this round's task; `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task); `session.error`→failed; `permission.ask`→waiting |
-| **zcode** | `~/.zcode/cli/config.json` hooks + `agentping-zcode-hook` | `UserPromptSubmit`→started (may be swallowed); `Stop`→finished; `PermissionRequest`→waiting |
 
-For pi / zcode, `finished` / `failed` **must carry a summary of this round's prompt**: otherwise, when `started` isn't published, the notification body is left with nothing but `session_…`.
+For pi / opencode, `finished` / `failed` **must carry a summary of this round's prompt**: otherwise, when `started` isn't published, the notification body is left with nothing but `session_…`.
 
 ## Protocol at a glance
 

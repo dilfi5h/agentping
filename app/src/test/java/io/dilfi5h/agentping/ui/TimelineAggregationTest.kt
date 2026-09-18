@@ -174,12 +174,12 @@ class TimelineAggregationTest {
     fun `host and agent chips match any message in the session, search looks through the session`() {
         val messages = listOf(
             message(id = "old-task", time = 100, session = "sess-a", host = "deb", agent = "pi", task = "fix login"),
-            message(id = "latest", time = 300, session = "sess-a", host = "mac", agent = "zcode", task = "ship apk"),
+            message(id = "latest", time = 300, session = "sess-a", host = "mac", agent = "opencode", task = "ship apk"),
             message(id = "other", time = 200, session = "sess-b", host = "deb", agent = "pi", task = "rewrite"),
         )
         val entries = aggregateTimeline(messages)
         assertEquals(listOf("deb", "mac"), distinctHosts(messages))
-        assertEquals(listOf("pi", "zcode"), distinctAgents(messages))
+        assertEquals(listOf("opencode", "pi"), distinctAgents(messages))
         assertEquals(
             listOf("sess-a", "sess-b"),
             filterEntries(entries, TimelineFilter(host = "deb")).map { (it as TimelineEntry.SessionGroup).sessionId },
@@ -190,7 +190,7 @@ class TimelineAggregationTest {
         )
         assertEquals(
             listOf("sess-a"),
-            filterEntries(entries, TimelineFilter(agent = "zcode")).map { (it as TimelineEntry.SessionGroup).sessionId },
+            filterEntries(entries, TimelineFilter(agent = "opencode")).map { (it as TimelineEntry.SessionGroup).sessionId },
         )
         assertEquals(
             listOf("sess-a"),
@@ -218,7 +218,7 @@ class TimelineAggregationTest {
         ts: Long? = null,
         dur: Long? = null,
         host: String? = "test-host",
-        agent: String? = "zcode",
+        agent: String? = "pi",
         state: String? = "finished",
         task: String? = "test task",
         detail: String? = null,

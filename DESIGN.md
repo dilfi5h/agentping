@@ -7,7 +7,7 @@
 
 Status: design finalized 2026-09-12. Progress: M1 server ✅ (§5), M3 App MVP ✅ (v0.0.1 released,
 repo github.com/dilfi5h/agentping, verification via tag→CI→deb fetch), M2 in progress (agent-notify ✅ +
-pi hook ✅ + zcode Windows/macOS ✅, claude not wired).
+pi/opencode hooks ✅, claude not wired).
 Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double-writes to the catch-all topic (§3.3/§3.4); ② waiting is a read-only snapshot with no resolution event; ③ hook paths don't carry `dur` (only the L2 wrapper provides it); ④ timeline sorting always uses the ntfy frame's `time`; `ts` is display-only.
 
 ## 1. Goals and Non-Goals
@@ -17,7 +17,7 @@ Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double
 - One-way read-only push: four states of an agent task (started / finished / failed / waiting)
 - Battery first: steady-state power target < 1%/day (no polling, no wake-lock abuse, one long connection for all subscriptions)
 - Performance first: end-to-end message latency < 2s (< 1s on a LAN-quality server); history queries hit local Room, in milliseconds
-- Coverage: agents with hooks get native integrations (pi / zcode / Claude Code / Codex / OpenCode / Gemini CLI); the rest fall back to process wrapping (100% coverage)
+- Coverage: agents with hooks get native integrations (pi / Claude Code / Codex / OpenCode / Gemini CLI); the rest fall back to process wrapping (100% coverage)
 - Human-readable at a glance: messages are readable without the App (official ntfy App / SMS-style fallback)
 
 **Non-Goals (explicitly not in V1)**
@@ -53,7 +53,7 @@ Component responsibilities:
 
 The push carrier is ntfy's message field. **One message, two readings** (the key design):
 
-- `title` = human-readable summary, template `[<{host}>] {agent} {state label}`, e.g. `[deb] zcode Awaiting approval`
+- `title` = human-readable summary, template `[<{host}>] {agent} {state label}`, e.g. `[deb] pi Awaiting approval`
 - `message` = **single-line JSON** (§3.2 structured payload)
 
 Effects:
@@ -65,11 +65,11 @@ Effects:
 ```json
 {
   "v": 1,
-  "agent": "zcode",
+  "agent": "pi",
   "host": "deb",
   "state": "waiting",
   "task": "fix login bug",
-  "detail": "PermissionRequest: Bash(rm -rf /tmp/x)",
+  "detail": "permission.ask: Bash(rm -rf /tmp/x)",
   "session": "sess_fe97e70b",
   "ts": 1760000000000,
   "dur": 123000
@@ -79,7 +79,7 @@ Effects:
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `v` | int | ✅ | Protocol version, always 1. On v>1 the App renders with capability degradation (unknown fields are ignored) |
-| `agent` | string | ✅ | Lowercase identifier: `pi` `zcode` `claude` `codex` `gemini` `opencode` `shell` (L2 wrapper default) or any custom string. The App renders unknown agents with a generic style |
+| `agent` | string | ✅ | Lowercase identifier: `pi` `claude` `codex` `gemini` `opencode` `shell` (L2 wrapper default) or any custom string. The App renders unknown agents with a generic style |
 | `host` | string | ✅ | Machine name; the reporter takes `hostname -s` automatically, overridable via `--host` |
 | `state` | string | ✅ | One of four, lowercase: `started` / `finished` / `failed` / `waiting`. waiting is a read-only snapshot with no resolution event (after approving locally the task keeps running; the waiting entry isn't retracted and later finished/failed naturally supersede it in the timeline). **`started` remains a legal state (hooks may keep sending it), but the reporter doesn't publish it** (high frequency, no action value; if the App ever receives one it only enters the timeline without a notification) |
 | `task` | string | ❌ | One-line task summary, ≤80 chars recommended. Source: prompt snippets / file names available in the hook context; omit if unavailable |
@@ -100,11 +100,11 @@ Effects:
 # Double-write to the catch-all topic: ntfy publishing doesn't support comma-separated multi-topic (only subscribing does), so it's two POSTs
 curl -m 5 -s -o /dev/null \
   -H "Authorization: Bearer tk_publish_xxx" \
-  -H "Title: [deb] zcode Awaiting approval" \
+  -H "Title: [deb] pi Awaiting approval" \
   -H "Tags: robot,hourglass" \
   -H "Priority: high" \
   -H "Markdown: no" \
-  -d '{"v":1,"agent":"zcode",...}' \
+  -d '{"v":1,"agent":"pi",...}' \
   https://ntfy.871116.xyz/agentping-deb
 curl -m 5 -s -o /dev/null \
   -H "Authorization: Bearer tk_publish_xxx" -H "Title: ..." \
@@ -144,12 +144,11 @@ Behavior contract: any internal error → one stderr line + exit 0; never blocks
 started: a legal state, hooks may keep calling; the reporter exits 0 silently without POSTing (one choke point, so each agent's hook needs no change)
 ```
 
-### 3.6 Per-Agent Hook Wiring (M2 scope: pi + zcode + Claude Code)
+### 3.6 Per-Agent Hook Wiring (M2 scope: pi + opencode + Claude Code)
 
 | Agent | Trigger | Event → state mapping |
 |---|---|---|
 | **pi** | extension `~/.pi/agent/extensions/agentping.js` (✅ shipped and device-verified 2026-09-12; API: `before_agent_start`/`agent_end`/`agent_settled`, calls agent-notify via `pi.exec`) | `before_agent_start`→started (task=prompt snippet; the reporter may not publish it), caches this round's task; `agent_end`(stopReason=error)→failed (task+detail=error text); `agent_settled`→finished (task=this round's prompt; skipped if this run already pushed failed). **finished/failed must carry task**, otherwise once started is swallowed the notification body is just the session id |
-| **zcode** | top-level `hooks` in `~/.zcode/cli/config.json` (⚠ must set `enabled:true`, disabled by default; on Windows use `server/hooks/agentping-zcode-hook`, `install-win.sh` generates a mergeable snippet; on macOS the same script is bash 3.2 compatible (mapfile replaced by line-by-line array reads); `install-macos.sh` generates the snippet: a `process` hook with `command=/bin/bash` + absolute script path) | Recommended: `UserPromptSubmit`→started (may be swallowed), `Stop`→finished (with task), `PermissionRequest`→waiting; `PostToolUseFailure`→don't push (noise). The Windows process hook invokes Git Bash; watch for CR in the stdin JSON |
 | **Claude Code** | hooks in `~/.claude/settings.json` | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting (CC routes permission reminders through this event) |
 | **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ shipped and device-verified 2026-09-16, v1.18.31; hooks: `chat.message`/`event`/`permission.ask`, spawns agent-notify) | `chat.message`→cache task (the text lives in `output.parts`, **not** in the `message.updated` payload); `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task; skipped if failed was pushed); `session.error`→failed (task+detail); `permission.ask`→waiting (title+metadata.command) |
 | **Codex** | `notify` in `~/.codex/config.toml` | agent-start/agent-end JSON args → started/finished |
@@ -206,14 +205,11 @@ agentping/
 │   ├── agent-notify.cmd.example  ← optional Win32 launcher example
 │   ├── etc-agentping.conf.example
 │   ├── install.sh                ← Linux: /usr/local/bin + pi extension
-│   ├── install-win.sh            ← Windows: ~/bin + zcode hook files
-│   ├── install-macos.sh          ← macOS: ~/bin + zcode hook files (reuses the Linux reporter)
+│   ├── install-win.sh            ← Windows: ~/bin reporter
+│   ├── install-macos.sh          ← macOS: ~/bin + pi / opencode hooks (reuses the Linux reporter)
 │   └── hooks/
 │       ├── pi-extension.js
-│       ├── opencode-plugin.js
-│       ├── agentping-zcode-hook
-│       ├── agentping-zcode-hook-parse.py
-│       └── zcode-snippet.json    ← placeholder snippet; claude/codex deferred
+│       └── opencode-plugin.js      ← claude/codex deferred
 ├── app/
 └── .github/workflows/release.yml
 ```
@@ -235,6 +231,6 @@ Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/code
 | Milestone | Content | Acceptance |
 |---|---|---|
 | M1 server up | ntfy live + subdomain + two tokens; curl publishes → official ntfy App on the phone receives | End-to-end < 2s |
-| M2 hooks | agent-notify finalized + pi/zcode/claude wired | All four states received for real tasks |
+| M2 hooks | agent-notify finalized + pi/opencode wired (claude deferred) | All four states received for real tasks |
 | M3 App MVP | WS subscribe + notifications + timeline + settings page | Installs on device, self-heals after process kill, reconnects after network loss |
 | M4 polish | Filters / history search / start on boot / notification tiers | Search + host/agent chips + 7-day local retention shipped; boot and notification tiers already in |
