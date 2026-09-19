@@ -96,6 +96,8 @@ fun TimelineScreen(
     connectionState: String,
     onRefresh: () -> Unit,
     onDelete: (String) -> Unit,
+    openSessionId: String? = null,
+    onOpenSessionConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var refreshing by remember { mutableStateOf(false) }
@@ -127,8 +129,20 @@ fun TimelineScreen(
     LaunchedEffect(connectionState) {
         if (connectionState != "Connecting" && connectionState.isNotBlank()) refreshing = false
     }
-    LaunchedEffect(selectedSessionId, selectedMessages?.size) {
-        if (selectedSessionId != null && selectedMessages.isNullOrEmpty()) selectedSessionId = null
+    LaunchedEffect(openSessionId, messages) {
+        val sessionId = resolveOpenSession(openSessionId, messages)
+        when {
+            sessionId != null -> {
+                selectedSessionId = sessionId
+                onOpenSessionConsumed()
+            }
+            shouldDropOpenSession(openSessionId, messages) -> onOpenSessionConsumed()
+        }
+    }
+    LaunchedEffect(selectedSessionId, selectedMessages?.size, openSessionId) {
+        if (selectedSessionId != null && selectedMessages.isNullOrEmpty() && openSessionId == null) {
+            selectedSessionId = null
+        }
     }
     LaunchedEffect(hosts, hostFilter) {
         if (hostFilter != null && hostFilter !in hosts) hostFilter = null

@@ -3,6 +3,8 @@ package io.dilfi5h.agentping
 import android.Manifest
 import android.app.NotificationManager
 import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -21,9 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import io.dilfi5h.agentping.data.AppDatabase
@@ -52,6 +52,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var settings: SettingsStore
     private val healthTick = MutableStateFlow(0)
+    private val openSession = MutableStateFlow<String?>(null)
+    private val selectedTab = MutableStateFlow(0)
 
     private val notifPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -74,7 +76,14 @@ class MainActivity : ComponentActivity() {
 
         // Already configured: start the service right away; after settings are saved the App restarts it via callback
         if (settings.flow.value.configured) PingService.start(this)
+        applyOpenIntent(intent)
         refreshHealth()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyOpenIntent(intent)
     }
 
     override fun onResume() {
@@ -84,7 +93,8 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun App(timeline: kotlinx.coroutines.flow.StateFlow<List<io.dilfi5h.agentping.data.MessageEntity>>) {
-        var tab by remember { mutableIntStateOf(0) }
+        val tab by selectedTab.collectAsState()
+        val openSessionId by openSession.collectAsState()
         val settingsState by settings.flow.collectAsState()
         val conn by PingService.connectionState.collectAsState()
         val messages by timeline.collectAsState()
@@ -99,13 +109,13 @@ class MainActivity : ComponentActivity() {
                 NavigationBar {
                     NavigationBarItem(
                         selected = tab == 0,
-                        onClick = { tab = 0 },
+                        onClick = { selectedTab.value = 0 },
                         icon = { Icon(Icons.AutoMirrored.Filled.List, null) },
                         label = { Text("Timeline") },
                     )
                     NavigationBarItem(
                         selected = tab == 1,
-                        onClick = { tab = 1 },
+                        onClick = { selectedTab.value = 1 },
                         icon = { Icon(Icons.Filled.Settings, null) },
                         label = { Text("Settings") },
                     )
@@ -116,6 +126,8 @@ class MainActivity : ComponentActivity() {
                 TimelineScreen(
                     messages = messages,
                     connectionState = conn,
+                    openSessionId = openSessionId,
+                    onOpenSessionConsumed = { openSession.value = null },
                     onRefresh = { PingService.refresh(this) },
                     onDelete = { id ->
                         lifecycleScope.launch {
@@ -139,7 +151,7 @@ class MainActivity : ComponentActivity() {
                         AppLog.log("UI", "settings saved topic=${it.topic} url=${it.serverUrl}")
                         settings.save(it)
                         PingService.reload(this)
-                        tab = 0
+                        selectedTab.value = 0
                     },
                     onRestartService = {
                         AppLog.log("UI", "manual reconnect")
@@ -169,6 +181,16 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.padding(pad),
                 )
             }
+        }
+    }
+
+    private fun applyOpenIntent(intent: Intent?) {
+        val session = intent?.getStringExtra(EXTRA_OPEN_SESSION)?.takeIf { it.isNotBlank() }
+        if (session != null) {
+            AppLog.log("UI", "open session from notification=$session")
+            selectedTab.value = 0
+            openSession.value = session
+            intent.removeExtra(EXTRA_OPEN_SESSION)
         }
     }
 
@@ -212,5 +234,17 @@ class MainActivity : ComponentActivity() {
         } catch (_: ActivityNotFoundException) {
             startActivity(appDetailsIntent(packageName))
         }
+    }
+
+    companion object {
+        const val EXTRA_OPEN_SESSION = "io.dilfi5h.agentping.OPEN_SESSION"
+
+        fun openIntent(ctx: Context, session: String? = null): Intent =
+            Intent(ctx, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+                session?.takeIf { it.isNotBlank() }?.let { putExtra(EXTRA_OPEN_SESSION, it) }
+            }
     }
 }

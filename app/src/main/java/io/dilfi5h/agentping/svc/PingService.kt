@@ -212,7 +212,7 @@ class PingService : Service() {
             .setContentText(text.take(200))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
-            .setContentIntent(mainIntent())
+            .setContentIntent(mainIntent(m.session))
             .setCategory(
                 if (alert) NotificationCompat.CATEGORY_ALARM
                 else NotificationCompat.CATEGORY_STATUS
@@ -249,7 +249,7 @@ class PingService : Service() {
             .setContentText("Latest: $title (plus $extra earlier messages, tap to open)")
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
-            .setContentIntent(mainIntent())
+            .setContentIntent(mainIntent(m.session))
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .build()
         AppLog.log("NOTIF", "post summary: extra=$extra latest=$title")
@@ -317,10 +317,19 @@ class PingService : Service() {
         return t.joinToString("+").ifBlank { "other" }
     }
 
-    private fun mainIntent() = PendingIntent.getActivity(
-        this, 0, Intent(this, MainActivity::class.java),
-        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-    )
+    private fun mainIntent(session: String? = null) =
+        PendingIntent.getActivity(
+            this,
+            sessionRequestCode(session),
+            MainActivity.openIntent(this, session),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+
+    /** Distinct request codes so one session's PendingIntent does not overwrite another. */
+    private fun sessionRequestCode(session: String?): Int {
+        val id = session?.takeIf { it.isNotBlank() } ?: return REQ_OPEN_HOME
+        return REQ_OPEN_SESSION_BASE + (id.hashCode() and 0x7fff)
+    }
 
     companion object {
         const val CH_STATUS = io.dilfi5h.agentping.notify.CH_STATUS
@@ -402,7 +411,7 @@ class PingService : Service() {
                 .setAutoCancel(true)
                 .setContentIntent(
                     PendingIntent.getActivity(
-                        ctx, 0, Intent(ctx, MainActivity::class.java),
+                        ctx, 0, MainActivity.openIntent(ctx),
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                     )
                 )
@@ -423,6 +432,8 @@ class PingService : Service() {
         const val ACTION_RELOAD = "io.dilfi5h.agentping.RELOAD"
         const val ACTION_REFRESH = "io.dilfi5h.agentping.REFRESH"
         const val SINCE_BACKFILL = "12h"
+        private const val REQ_OPEN_HOME = 0
+        private const val REQ_OPEN_SESSION_BASE = 1000
 
         private val sinceOverride = MutableStateFlow<String?>(null)
     }

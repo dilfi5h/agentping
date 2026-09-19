@@ -27,12 +27,30 @@ internal sealed interface TimelineEntry {
     }
 }
 
+/** Non-blank session id from a payload, or null when the message is a standalone card. */
+internal fun sessionIdOf(session: String?): String? = session?.takeIf { it.isNotBlank() }
+
+/**
+ * How a notification tap should land on the timeline.
+ * Wait until Room has emitted at least one snapshot; then open the session if it exists,
+ * otherwise drop the request so a pruned/deleted session still just shows the list.
+ */
+internal fun resolveOpenSession(openSessionId: String?, messages: List<MessageEntity>): String? {
+    val sessionId = sessionIdOf(openSessionId) ?: return null
+    return sessionId.takeIf { id -> messages.any { it.session == id } }
+}
+
+internal fun shouldDropOpenSession(openSessionId: String?, messages: List<MessageEntity>): Boolean {
+    val sessionId = sessionIdOf(openSessionId) ?: return false
+    return messages.isNotEmpty() && messages.none { it.session == sessionId }
+}
+
 internal fun aggregateTimeline(messages: List<MessageEntity>): List<TimelineEntry> {
     val sessionMessages = linkedMapOf<String, MutableList<MessageEntity>>()
     val entries = mutableListOf<TimelineEntry>()
 
     messages.forEach { message ->
-        val sessionId = message.session?.takeIf { it.isNotBlank() }
+        val sessionId = sessionIdOf(message.session)
         if (sessionId == null) {
             entries += TimelineEntry.SingleMessage(message)
         } else {

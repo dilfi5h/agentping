@@ -31,7 +31,7 @@ Notes:
 - Claude Code / Codex / Gemini CLI are in the protocol (`agent` field) but **not shipped** yet.
 - Windows hooks call Git Bash to run the bash reporter (Node cannot spawn `.sh` scripts directly on Windows).
 
-Current release: [v0.0.11](https://github.com/dilfi5h/agentping/releases/tag/v0.0.11)
+Current release: [v0.0.12](https://github.com/dilfi5h/agentping/releases/tag/v0.0.12)
 
 ## Download the App
 
@@ -54,7 +54,7 @@ On first install, grant the notification permission; it's also recommended to ad
 
 - Four states: `started` / `finished` / `failed` / `waiting`
 - One long-lived WebSocket subscription; resumes after disconnects via `since=<last_id>`
-- Local Room history (7 days), searchable on the timeline with host/agent chips; failures and waiting states use high-priority notifications
+- Local Room history (7 days), searchable on the timeline with host/agent chips; failures and waiting states use high-priority notifications; tapping a task notification opens that session
 
 **Doesn't do (V1):**
 

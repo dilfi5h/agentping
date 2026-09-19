@@ -205,6 +205,26 @@ class TimelineAggregationTest {
     }
 
     @Test
+    fun `sessionIdOf drops blank and whitespace-only ids`() {
+        assertNull(sessionIdOf(null))
+        assertNull(sessionIdOf(""))
+        assertNull(sessionIdOf("   "))
+        assertEquals("sess_fe97e70b", sessionIdOf("sess_fe97e70b"))
+    }
+
+    @Test
+    fun `notification tap waits until history has loaded then opens or drops`() {
+        val loaded = listOf(message(id = "a", time = 1, session = "sess-a"))
+        assertNull(resolveOpenSession("sess-a", emptyList()))
+        assertFalse(shouldDropOpenSession("sess-a", emptyList()))
+        assertEquals("sess-a", resolveOpenSession("sess-a", loaded))
+        assertFalse(shouldDropOpenSession("sess-a", loaded))
+        assertNull(resolveOpenSession("sess-gone", loaded))
+        assertTrue(shouldDropOpenSession("sess-gone", loaded))
+        assertFalse(shouldDropOpenSession(null, loaded))
+    }
+
+    @Test
     fun `blank query with no chips leaves the list unchanged`() {
         val entries = aggregateTimeline(listOf(message(id = "a", time = 1, session = "s")))
         assertEquals(entries, filterEntries(entries, TimelineFilter()))
