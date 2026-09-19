@@ -150,7 +150,7 @@ started: a legal state, hooks may keep calling; the reporter exits 0 silently wi
 |---|---|---|
 | **pi** | extension `~/.pi/agent/extensions/agentping.js` (✅ shipped and device-verified 2026-09-12; API: `before_agent_start`/`agent_end`/`agent_settled`, calls agent-notify via `pi.exec`; on Windows `pi.exec` runs Git Bash with the script path because Node cannot spawn bash scripts directly) | `before_agent_start`→started (task=prompt snippet; the reporter may not publish it), caches this round's task; `agent_end`(stopReason=error)→failed (task+detail=error text); `agent_settled`→finished (task=this round's prompt; skipped if this run already pushed failed). **finished/failed must carry task**, otherwise once started is swallowed the notification body is just the session id |
 | **Claude Code** | hooks in `~/.claude/settings.json` | `UserPromptSubmit`→started, `Stop`→finished, `Notification`→waiting (CC routes permission reminders through this event) |
-| **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ shipped and device-verified 2026-09-16, v1.18.31; hooks: `chat.message`/`event`/`permission.ask`, spawns agent-notify; on Windows spawns Git Bash with the script path for the same reason) | `chat.message`→cache task (the text lives in `output.parts`, **not** in the `message.updated` payload); `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task; skipped if failed was pushed); `session.error`→failed (task+detail); `permission.ask`→waiting (title+metadata.command) |
+| **opencode** | plugin `~/.config/opencode/plugins/agentping.js` (✅ V1 shipped 2026-09-16; ✅ V2 port 2026-09-19, device-verified end-to-end on OpenCode 2.0.10 — plain `export default { id, setup(ctx) }`; the loader requires a default export `{ id, effect \| setup }` and rejects anything else with `Plugin must export a default definition with an id and an effect or setup function.`; the bare specifier `@opencode/plugin` does not resolve; `setup()` may return a disposer (used to abort the event subscription); spawns agent-notify; on Windows spawns Git Bash with the script path for the same reason) | V2 (all verified live): `permission.hook("evaluate")` when `effect==="ask"` (payload `{sessionID,agent,action,resources,metadata}`)→waiting (action+resources/metadata); `ctx.event.subscribe({signal})` stream with `.data` payloads: `session.inbox.enqueued` (`data.item.payload.text`)→cache task; `session.execution.started`→started (may be swallowed); `session.execution.succeeded`→finished (with task); `session.execution.failed` / `session.execution.interrupted`→failed (task+detail). **V1's `session.idle` / `session.status` / `session.error` events and the `session.hook("prompt")` hook do not exist in 2.x** — the prompt hook registers but never fires; legacy names are kept only as a fallback. Caveat: the plugin is global, so every running opencode process publishes for the same events — extra sessions cause duplicate notifications (some without task) |
 | **Codex** | `notify` in `~/.codex/config.toml` | agent-start/agent-end JSON args → started/finished |
 | **OpenCode / Gemini CLI** | plugin / hooks (check current-version docs at kickoff) | Same-shape mapping |
 | **Everything else** (L2 fallback) | `agentping run -- <cmd>` | launch→started; exit 0→finished(dur), non-zero→failed(dur, detail=stderr tail) |
@@ -209,7 +209,9 @@ agentping/
 │   ├── install-macos.sh          ← macOS: ~/bin + pi / opencode hooks (reuses the Linux reporter)
 │   └── hooks/
 │       ├── pi-extension.js
-│       └── opencode-plugin.js      ← claude/codex deferred
+│       ├── opencode-plugin.js      ← OpenCode 1.x (V1 hooks: chat.message / event / permission.ask)
+│       └── opencode-v2-plugin.js   ← OpenCode 2.x (export default { id, setup } + session.execution.*)
+                                    installers pick by `opencode --version`  ← claude/codex deferred
 ├── app/
 └── .github/workflows/release.yml
 ```

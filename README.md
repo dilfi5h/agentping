@@ -31,7 +31,7 @@ Notes:
 - Claude Code / Codex / Gemini CLI are in the protocol (`agent` field) but **not shipped** yet.
 - Windows hooks call Git Bash to run the bash reporter (Node cannot spawn `.sh` scripts directly on Windows).
 
-Current release: [v0.0.12](https://github.com/dilfi5h/agentping/releases/tag/v0.0.12)
+Current release: [v0.0.13](https://github.com/dilfi5h/agentping/releases/tag/v0.0.13)
 
 ## Download the App
 
@@ -86,7 +86,7 @@ Installs (under `sudo`, plugins go to the caller's home, not `/root`):
 
 - `/usr/local/bin/agent-notify` (Linux curl version)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
-- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
+- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
 
 If `/etc/agentping.conf` is missing, create it as prompted (`chmod 600`):
 
@@ -113,7 +113,7 @@ Installs:
 - `~/bin/agentping-ntfy-body.py` (publishes UTF-8 JSON, avoiding Windows curl's mojibake with non-ASCII Titles)
 - `~/bin/agent-notify.cmd` (Win32 launcher via Git Bash)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
-- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
+- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
 - A `~/.agentping.conf` template if no config exists
 
 If OpenCode Desktop doesn't auto-load `~/.config/opencode/plugins/`, add this to `~/.config/opencode/opencode.jsonc` and reopen OpenCode:
@@ -134,7 +134,7 @@ Installs:
 
 - `~/bin/agent-notify` (Linux curl version, works as-is on macOS)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
-- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine)
+- `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
 - A `~/.agentping.conf` template if no config exists (`chmod 600`)
 
 ### Quick self-test
@@ -164,7 +164,7 @@ Any internal error still `exit 0`s — it never drags the agent down.
 | Agent | Trigger | Mapping |
 |---|---|---|
 | **pi** | `~/.pi/agent/extensions/agentping.js` | `before_agent_start`→started (may be swallowed); `agent_settled`→finished (carries this round's task); errors→failed (task+detail) |
-| **opencode** | `~/.config/opencode/plugins/agentping.js` (global plugin dir) | `chat.message`→caches this round's task; `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task); `session.error`→failed; `permission.ask`→waiting |
+| **opencode** | `~/.config/opencode/plugins/agentping.js` (global plugin dir; installers pick the file by `opencode --version`: 1.x → `hooks/opencode-plugin.js`, 2.x → `hooks/opencode-v2-plugin.js`) | **V1 (1.x):** `chat.message`→caches this round's task; `session.status:busy`→started (may be swallowed); `session.idle`→finished (with task); `session.error`→failed; `permission.ask`→waiting. **V2 (2.x):** `session.inbox.enqueued`→caches this round's task; `session.execution.started`→started (may be swallowed); `session.execution.succeeded`→finished (with task); `session.execution.failed`/`interrupted`→failed; `permission.evaluate` with `effect=ask`→waiting. Details: [opencode2.api.md](opencode2.api.md) |
 
 For pi / opencode, `finished` / `failed` **must carry a summary of this round's prompt**: otherwise, when `started` isn't published, the notification body is left with nothing but `session_…`.
 
