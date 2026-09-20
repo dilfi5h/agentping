@@ -51,7 +51,7 @@ echo "installed: $HOME/.pi/agent/extensions/agentping.js"
 mkdir -p "$HOME/.config/opencode/plugins"
 # Pick the plugin matching the installed OpenCode major version:
 #   1.x           -> hooks/opencode-plugin.js     (V1 hooks API: chat.message / event / permission.ask)
-#   2.x / unknown -> hooks/opencode-v2-plugin.js  (V2: export default { id, setup } + session.execution.* events)
+#   2.x / unknown -> hooks/opencode-v2-plugin.js  (V2: export default { id, setup } + session.step.* / session.execution.*)
 OC_MAJOR=0
 OC_BIN=""
 if command -v opencode >/dev/null 2>&1; then

@@ -1,13 +1,14 @@
-# OpenCode 2.x 实测笔记（2.0.10, macOS）
+# OpenCode 2.x 实测笔记（2.0.10 / 2.0.11, macOS）
 
-> 2026-09-19 调试 agentping 插件 + 模型配置时实测整理。所有结论都在本机 2.0.10 上验证过，
-> 标注「二进制」的还交叉核对了 `~/.opencode/bin/opencode` 内嵌源码，标注「实测」的跑过真实会话。
-> 官方文档（opencode.ai/docs）目前仍描述 1.x 的 hooks API，**与 2.0.10 实际行为不符**，以本文为准。
+> 2026-09-19 调试 agentping 插件 + 模型配置时实测整理；2026-09-20 在 2.0.11 TUI 上补了
+> 「交互会话不按轮发布 `session.execution.*`」的结论。标注「二进制」的还交叉核对了
+> `~/.opencode/bin/opencode` 内嵌源码，标注「实测」的跑过真实会话。
+> 官方文档（opencode.ai/docs）目前仍描述 1.x 的 hooks API，**与 2.x 实际行为不符**，以本文为准。
 
 ## 0. 环境与常见坑
 
 - 本机同时存在两套安装：
-  - `~/.opencode/bin/opencode` → v2.0.10（`opencode --version`）
+  - `~/.opencode/bin/opencode` → v2.0.11（`opencode --version`；2026-09-19 验证时是 2.0.10）
   - 全局 npm `@opencode-ai/cli` → `opencode2`（beta-18684，旧）
 - 两套抢同一个后台服务端口（49374），后来者报：
   `Managed service port 49374 on 127.0.0.1 is already in use … Configure another port with opencode service set port <port>`
@@ -126,6 +127,12 @@ hook 内可改 `p.effect`（"deny"/"allow"）与 `p.message`。只有 `effect ==
    plugin.updated, mcp.status.changed, mcp.resources.changed, integration.updated`
 - **没有** `session.idle` / `session.status` / `session.error`（V1 的名字）。
   `session.execution.*` 全集（二进制）：`started` / `succeeded` / `failed` / `interrupted`。
+- **2.0.11 交互 TUI（实测）**：Session runner 在整段会话期间保持 active，`session.execution.started`
+  只在会话开始发一次，`session.execution.succeeded` 要等到整段 settle（退出 / idle）才发。
+  每一轮用户回合的结束信号是 `session.step.ended`（`finish` 枚举：`stop` / `length` /
+  `tool-calls` / `content-filter` / `error` / `unknown`）。`finish=tool-calls` 表示还要继续调工具，
+  不是这一轮结束。agentping 因此用 `session.step.*` 做按轮通知，`session.execution.*` 只给
+  `opencode run` 这类一次性会话兜底。
 - `session.hook("prompt")` 能注册成功但**从不触发**；真正会触发的 hook 名（二进制内被触发的）：
   session 域 `context` / `compaction` / `generate` / `title` / `retry` / `model.request` / `http.request` /
   `http.response` / `experimental.ws.*`，tool 域 `execute.before` / `execute.after`，shell 域 `create.before`。
@@ -136,9 +143,9 @@ hook 内可改 `p.effect`（"deny"/"allow"）与 `p.message`。只有 `effect ==
 | 目的 | V1 | V2 |
 |---|---|---|
 | 缓存本轮 prompt | `chat.message` hook / `session.hook("prompt")` | 事件 `session.inbox.enqueued` → `data.item.payload.text` |
-| started | 事件 `session.status`(busy) | 事件 `session.execution.started` |
-| finished | 事件 `session.idle` | 事件 `session.execution.succeeded` |
-| failed | 事件 `session.error` | 事件 `session.execution.failed` / `session.execution.interrupted` |
+| started | 事件 `session.status`(busy) | 事件 `session.step.started`（`session.execution.started` 兜底；交互 TUI 整段会话只发一次） |
+| finished | 事件 `session.idle` | 事件 `session.step.ended` 且 `finish` 为 `stop` / `length` / `unknown`（`session.execution.succeeded` 兜底一次性 `opencode run`） |
+| failed | 事件 `session.error` | 事件 `session.step.ended` 且 `finish` 为 `error` / `content-filter`，或 `session.step.failed`（`session.execution.failed` / `interrupted` 兜底） |
 | waiting | hook `permission.ask` | hook `permission.hook("evaluate")` 且 `effect === "ask"` |
 
 ## 3. 排查手法（可复用）
@@ -161,3 +168,5 @@ hook 内可改 `p.effect`（"deny"/"allow"）与 `p.message`。只有 `effect ==
   未缓存到 task 的实例发出的通知只有 session id（task 为空）。多会话并存时需要跨进程去重
   （可用 `ctx.storage`），或保证只跑一个实例。
 - 同一事件在同进程内会被多个插件实例（多 location）重复投递，回调里自己做幂等。
+  agentping 按 `event.location.directory === ctx.location.directory` 过滤，再对
+  `(session, state, task, detail)` 做短窗口去重。

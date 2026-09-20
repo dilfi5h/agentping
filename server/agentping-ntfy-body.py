@@ -26,7 +26,10 @@ def _post(url: str, token: str, data: bytes, topic: str) -> None:
         },
     )
     with urllib.request.urlopen(req, timeout=PUBLISH_TIMEOUT_SEC) as resp:
+        code = getattr(resp, "status", None) or resp.getcode()
         resp.read()
+        if int(code) < 200 or int(code) >= 300:
+            raise urllib.error.HTTPError(url, int(code), f"http={code}", resp.headers, None)
 
 
 def main() -> int:

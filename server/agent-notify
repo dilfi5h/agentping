@@ -126,14 +126,20 @@ JSON=$(build_json) || { echo "agent-notify: json encode failed" >&2; exit 0; }
 [ -n "$JSON" ] || { echo "agent-notify: empty json" >&2; exit 0; }
 
 # Double-write to the catch-all topic (§3.3): agentping-<host> is kept for the official App, agentping-all for AgentPing
+# Still exit 0 on HTTP errors (hooks must never stall the agent), but print the status so a dead token is visible.
 for TOPIC in "agentping-${HOST}" "agentping-all"; do
-  curl -m 5 -s -o /dev/null \
+  HTTP=$(curl -m 5 -s -o /dev/null -w '%{http_code}' \
     -H "Authorization: Bearer ${AGENTPING_TOKEN}" \
     -H "Title: ${TITLE}" \
     -H "Tags: ${TAGS}" \
     -H "Priority: ${PRIO}" \
     -H "Markdown: no" \
     --data-binary "$JSON" \
-    "${AGENTPING_URL}/${TOPIC}" || true
+    "${AGENTPING_URL}/${TOPIC}" || true)
+  case "$HTTP" in
+    2??) ;;
+    "") echo "agent-notify: POST ${TOPIC} failed (no response)" >&2 ;;
+    *) echo "agent-notify: POST ${TOPIC} http=${HTTP}" >&2 ;;
+  esac
 done
 exit 0

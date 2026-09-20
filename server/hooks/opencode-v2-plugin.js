@@ -1,27 +1,39 @@
 // AgentPing reporter plugin for OpenCode 2.x (DESIGN.md §3.6)
 // Install: ~/.config/opencode/plugins/agentping.js  (needs agent-notify + agentping.conf)
 //
-// OpenCode 2 plugin contract (verified on 2.0.10): the module must default-export
+// OpenCode 2 plugin contract (verified on 2.0.10 / 2.0.11): the module must default-export
 //   { id: string, setup(ctx) }   — or { id, effect }
 // otherwise the loader rejects it with
 //   "Plugin must export a default definition with an id and an effect or setup function."
 // The bare specifier `@opencode/plugin` does not resolve; only node: builtins are imported.
 // setup() may return a disposer, which the loader calls on unload/reload.
 //
-// V2 hook/event surface (verified live on 2.0.10):
+// V2 hook/event surface:
 //   ctx.permission.hook("evaluate", p)  p={sessionID,agent,action,resources,metadata,effect}
 //       -> waiting when p.effect === "ask" (hook may set p.effect/p.message)
 //   ctx.event.subscribe({ signal })     events carry `.data` (no `.properties`)
 //       session.inbox.enqueued          data.item.payload.text = this round's user prompt
-//       session.execution.started       -> started (the reporter may not publish it)
-//       session.execution.succeeded     -> finished (with task)
+//       session.step.started            -> started (the reporter may not publish it)
+//       session.step.ended              finish=tool-calls: more tool rounds coming, ignore
+//                                       finish=stop|length|unknown: this turn finished
+//                                       finish=error|content-filter: this turn failed
+//       session.step.failed             -> failed (task + error detail)
+//       session.execution.started       -> started (fallback; TUI interactive runner stays
+//                                         alive across turns, so this fires once per session)
+//       session.execution.succeeded     -> finished if this turn has not already notified
+//                                         (covers `opencode run` one-shot sessions)
 //       session.execution.failed        -> failed (task + error detail)
 //       session.execution.interrupted   -> failed (task + "interrupted")
 //   NOTE: V1's session.idle / session.status / session.error events and the session.hook("prompt")
 //   hook do NOT exist in 2.x — the prompt hook registers but never fires.
+//   2.0.11 TUI: the Session runner only publishes session.execution.succeeded when the
+//   whole session settles, not after each user turn. Per-turn notifications must use
+//   session.step.ended (verified live on 2.0.11).
 // finished/failed must carry task: otherwise the notification body is just the session id.
 // Swallow every exception silently; never affect opencode itself.
 // Windows: Node spawn cannot run the bash reporter directly (ENOENT), so call Git Bash with the script path.
+// Duplicate fan-out: the plugin is loaded once per location and the event bus is global, so
+// filter by event.location.directory and collapse same-process repeats via once().
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
@@ -53,7 +65,9 @@ const GIT_BASH =
     : ""
 
 const tasks = new Map() // sessionID → latest user prompt
-const failedSent = new Set() // sessionIDs that already pushed failed
+const failedSent = new Set() // sessionIDs that already pushed failed this turn
+const turnDone = new Set() // sessionIDs that already pushed finished/failed this turn
+const recentlySent = new Map() // dedupeKey → timestamp (same-process multi-location fan-out)
 
 function trim(s, n) {
   return String(s == null ? "" : s)
@@ -62,12 +76,30 @@ function trim(s, n) {
     .slice(0, n)
 }
 
+function once(key, ms = 2000) {
+  const now = Date.now()
+  const prev = recentlySent.get(key) || 0
+  if (now - prev < ms) return false
+  recentlySent.set(key, now)
+  if (recentlySent.size > 200) {
+    for (const [k, ts] of recentlySent) {
+      if (now - ts > ms) recentlySent.delete(k)
+    }
+  }
+  return true
+}
+
 function send(sessionID, state, task, detail) {
   try {
     const args = [state, "--agent", "opencode"]
     if (sessionID) args.push("--session", String(sessionID))
     if (task) args.push("--task", String(task))
     if (detail) args.push("--detail", String(detail))
+    const dedupe = [sessionID, state, task || "", detail || ""].join("\0")
+    if (!once(dedupe)) return
+    const env = { ...process.env }
+    if (HOME && !env.HOME) env.HOME = HOME
+    if (HOME && !env.USERPROFILE) env.USERPROFILE = HOME
     // On Windows, detached spawn of a bash script fails with ENOENT; drive via Git Bash instead.
     let child
     if (GIT_BASH && NOTIFY !== "agent-notify") {
@@ -76,9 +108,10 @@ function send(sessionID, state, task, detail) {
         stdio: "ignore",
         detached: true,
         windowsHide: true,
+        env,
       })
     } else {
-      child = spawn(NOTIFY, args, { stdio: "ignore", detached: true })
+      child = spawn(NOTIFY, args, { stdio: "ignore", detached: true, env })
     }
     child.on("error", () => {})
     child.unref()
@@ -90,10 +123,31 @@ function payload(event) {
   return event?.data || event?.properties || event || {}
 }
 
+function eventDirectory(event) {
+  return event?.location?.directory || event?.directory || ""
+}
+
+function isLocalEvent(event, here) {
+  if (!here) return true
+  const dir = eventDirectory(event)
+  if (!dir) return true
+  return dir === here
+}
+
 /** This round's user prompt, from whatever source we captured it. */
 function cacheTask(sid, text) {
   const t = trim(text, 200)
   if (sid && t) tasks.set(sid, t)
+}
+
+function beginTurn(sid) {
+  if (!sid) return
+  failedSent.delete(sid)
+  turnDone.delete(sid)
+}
+
+function markTurnDone(sid) {
+  if (sid) turnDone.add(sid)
 }
 
 function errorDetail(err) {
@@ -107,9 +161,13 @@ function errorDetail(err) {
   return trim(detail, 500)
 }
 
+const STEP_FAILED_FINISH = new Set(["error", "content-filter"])
+
 export default {
   id: "agentping",
   async setup(ctx) {
+    const here = ctx?.location?.directory || ""
+
     // waiting: fire only when the evaluated permission actually asks the user.
     try {
       await ctx.permission.hook("evaluate", (event) => {
@@ -132,6 +190,7 @@ export default {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           try {
+            if (!isLocalEvent(event, here)) continue
             const type = event?.type || ""
             const props = payload(event)
             const sid = props.sessionID || ""
@@ -141,18 +200,45 @@ export default {
               const item = props.item || {}
               const text = item?.payload?.text ?? props.text ?? ""
               cacheTask(sid, typeof text === "string" ? text : "")
+              beginTurn(sid)
               continue
             }
-            if (type === "session.execution.started") {
-              failedSent.delete(sid)
+            if (type === "session.step.started" || type === "session.execution.started") {
+              beginTurn(sid)
               send(sid, "started", tasks.get(sid) || "")
               continue
             }
+            // Interactive TUI (2.0.11): one execution spans many user turns.
+            // A step that ends with tool-calls is mid-turn; stop/length/unknown is the turn finishing.
+            if (type === "session.step.ended") {
+              const finish = props.finish || ""
+              if (finish === "tool-calls") continue
+              if (turnDone.has(sid)) continue
+              markTurnDone(sid)
+              if (STEP_FAILED_FINISH.has(finish)) {
+                failedSent.add(sid)
+                send(sid, "failed", tasks.get(sid) || "", errorDetail(props.error) || finish)
+              } else {
+                send(sid, "finished", tasks.get(sid) || "", finish === "length" ? "length" : "")
+              }
+              continue
+            }
+            if (type === "session.step.failed") {
+              if (turnDone.has(sid)) continue
+              markTurnDone(sid)
+              failedSent.add(sid)
+              send(sid, "failed", tasks.get(sid) || "", errorDetail(props.error) || trim(props.message, 500))
+              continue
+            }
             if (type === "session.execution.succeeded") {
+              if (turnDone.has(sid)) continue
+              markTurnDone(sid)
               send(sid, "finished", tasks.get(sid) || "")
               continue
             }
             if (type === "session.execution.failed" || type === "session.execution.interrupted") {
+              if (turnDone.has(sid) && failedSent.has(sid)) continue
+              markTurnDone(sid)
               failedSent.add(sid)
               send(
                 sid,
@@ -164,17 +250,20 @@ export default {
             }
             // Fallback for builds that still emit the legacy event names.
             if (type === "session.status" && props.status && props.status.type === "busy") {
-              failedSent.delete(sid)
+              beginTurn(sid)
               send(sid, "started", tasks.get(sid) || "")
               continue
             }
             if (type === "session.error") {
+              if (turnDone.has(sid) && failedSent.has(sid)) continue
+              markTurnDone(sid)
               failedSent.add(sid)
               send(sid, "failed", tasks.get(sid) || "", errorDetail(props.error))
               continue
             }
             if (type === "session.idle") {
-              if (failedSent.has(sid)) continue
+              if (failedSent.has(sid) || turnDone.has(sid)) continue
+              markTurnDone(sid)
               send(sid, "finished", tasks.get(sid) || "")
               continue
             }
