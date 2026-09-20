@@ -6,6 +6,7 @@ export PYTHONIOENCODING=utf-8
 # agent-notify.win — AgentPing reporter for Windows/Git Bash
 # Publishes via python urllib (avoids curl header mojibake with non-ASCII text)
 # Config sources: env vars > /etc/agentping.conf > ~/.agentping.conf
+# Debounce: same as Linux agent-notify (see DESIGN.md §3.5); AGENTPING_DEBOUNCE_SEC
 # Any internal error → one stderr line + exit 0
 
 STATE="${1:-}"; shift 2>/dev/null || true
@@ -61,6 +62,8 @@ fi
 [ -f "$BODY_PY" ] || { echo "agent-notify: missing $BODY_PY" >&2; exit 0; }
 
 export AGENTPING_URL AGENTPING_TOKEN
+[ -n "${AGENTPING_DEBOUNCE_SEC+x}" ] && export AGENTPING_DEBOUNCE_SEC
+
 AP_AGENT="$AGENT" AP_HOST="$HOST" AP_STATE="$STATE" \
 AP_TASK="$TASK" AP_DETAIL="$DETAIL" AP_SESSION="$SESSION" AP_DUR="$DUR" \
 AP_TAGS="$TAGS" AP_PRIO="$PRIO_N" AP_TOPIC_HOST="agentping-${HOST}" \

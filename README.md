@@ -84,7 +84,7 @@ sudo ./install.sh
 
 Installs (under `sudo`, plugins go to the caller's home, not `/root`):
 
-- `/usr/local/bin/agent-notify` (Linux curl version)
+- `/usr/local/bin/agent-notify` + `/usr/local/bin/agentping-ntfy-body.py` (publish + session debounce)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
 - `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
 
@@ -95,6 +95,8 @@ AGENTPING_URL=https://ntfy.example.com
 AGENTPING_TOKEN=<publish-token>
 # optional: override the hostname for containers etc.
 # AGENTPING_HOST=deb
+# optional: finished/waiting debounce window in seconds (default 180; 0 = off)
+# AGENTPING_DEBOUNCE_SEC=180
 ```
 
 ### Windows (Git Bash)
@@ -110,7 +112,7 @@ Dependencies: Git Bash, `python`, access to your ntfy.
 Installs:
 
 - `~/bin/agent-notify` (from `agent-notify.win`)
-- `~/bin/agentping-ntfy-body.py` (publishes UTF-8 JSON, avoiding Windows curl's mojibake with non-ASCII Titles)
+- `~/bin/agentping-ntfy-body.py` (UTF-8 JSON publish + session debounce; also avoids Windows curl mojibake with non-ASCII Titles)
 - `~/bin/agent-notify.cmd` (Win32 launcher via Git Bash)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
 - `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
@@ -132,7 +134,7 @@ If OpenCode Desktop doesn't auto-load `~/.config/opencode/plugins/`, add this to
 
 Installs:
 
-- `~/bin/agent-notify` (Linux curl version, works as-is on macOS)
+- `~/bin/agent-notify` + `~/bin/agentping-ntfy-body.py` (same publish + debounce path as Linux)
 - `~/.pi/agent/extensions/agentping.js` (if pi is used on this machine)
 - `~/.config/opencode/plugins/agentping.js` (if opencode is used on this machine; V1 or V2 plugin picked by `opencode --version`)
 - A `~/.agentping.conf` template if no config exists (`chmod 600`)
@@ -158,6 +160,8 @@ agent-notify <started|finished|failed|waiting> [options]
 ```
 
 Any internal error still `exit 0`s — it never drags the agent down.
+
+**Debounce (finished / waiting):** the same session (or `host`+`agent` when `--session` is omitted) waits `AGENTPING_DEBOUNCE_SEC` seconds (default **180**, from the first event) then publishes **one** merged notice. Metadata comes from the first event; later `task` / `detail` text is appended into `detail`. **`failed` is never delayed** and cancels any pending merge for that key. Set `AGENTPING_DEBOUNCE_SEC=0` to disable. Details: [DESIGN.md](DESIGN.md) §3.5.
 
 ### Wired-up agents
 

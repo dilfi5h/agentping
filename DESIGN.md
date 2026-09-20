@@ -139,10 +139,20 @@ agent-notify <state> [options]
   --detail <text>   extra info
   --session <id>
   --dur <ms>
-Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf (KEY=VALUE)
+Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN / AGENTPING_DEBOUNCE_SEC
+  > /etc/agentping.conf (KEY=VALUE) > ~/.agentping.conf
 Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
 started: a legal state, hooks may keep calling; the reporter exits 0 silently without POSTing (one choke point, so each agent's hook needs no change)
 ```
+
+**Session debounce** (anti-flood, reporter-side choke point — ntfy has no per-session merge):
+
+- Window: `AGENTPING_DEBOUNCE_SEC` seconds from the **first** event of a key (default **180**; `0` disables → every event publishes immediately, same as pre-debounce).
+- Key: `host + "\\0" + session` when `--session` is set; otherwise `host + "\\0" + agent`.
+- Applies to **`finished` / `waiting` only**. Window end publishes **one** notice: agent / host / state / session / title / tags / priority / task from the **first** event; subsequent events append their task/detail **text** into `detail` (newline-joined, clipped to 500, earliest kept).
+- **`failed` always publishes immediately** and **clears** any pending debounce for that key (so a later flush cannot emit a stale finished/waiting).
+- Pending state: `${XDG_CACHE_HOME:-~/.cache}/agentping/debounce/<keyhash>/` (`meta.json` + `parts.jsonl`). A detached sleeper process flushes; the hook itself never waits on the window.
+- Linux / macOS / Windows share `agentping-ntfy-body.py` for publish + debounce (bash wrappers only assemble env).
 
 ### 3.6 Per-Agent Hook Wiring (M2 scope: pi + opencode + Claude Code)
 
@@ -199,14 +209,14 @@ agentping/
 ├── DESIGN.md
 ├── README.md
 ├── server/
-│   ├── agent-notify              ← Linux reporter (curl)
+│   ├── agent-notify              ← Linux/macOS reporter (bash wrapper → body.py)
 │   ├── agent-notify.win          ← Windows/Git Bash reporter shell
-│   ├── agentping-ntfy-body.py    ← Windows UTF-8 JSON publish helper
+│   ├── agentping-ntfy-body.py    ← publish + session debounce (all platforms)
 │   ├── agent-notify.cmd.example  ← optional Win32 launcher example
 │   ├── etc-agentping.conf.example
-│   ├── install.sh                ← Linux: /usr/local/bin + pi extension
-│   ├── install-win.sh            ← Windows: ~/bin reporter + pi / opencode hooks (hooks spawn via Git Bash)
-│   ├── install-macos.sh          ← macOS: ~/bin + pi / opencode hooks (reuses the Linux reporter)
+│   ├── install.sh                ← Linux: /usr/local/bin reporter+body.py + pi extension
+│   ├── install-win.sh            ← Windows: ~/bin reporter + body.py + pi / opencode hooks (hooks spawn via Git Bash)
+│   ├── install-macos.sh          ← macOS: ~/bin reporter+body.py + pi / opencode hooks
 │   └── hooks/
 │       ├── pi-extension.js
 │       ├── opencode-plugin.js      ← OpenCode 1.x (V1 hooks: chat.message / event / permission.ask)

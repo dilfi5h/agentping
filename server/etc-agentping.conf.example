@@ -5,3 +5,7 @@ AGENTPING_URL=https://ntfy.example.com
 AGENTPING_TOKEN=tk_replace_with_publish_token
 # Optional short host label for titles/topics (recommended on Windows)
 # AGENTPING_HOST=win
+# Session debounce for finished/waiting (seconds from first event; default 180).
+# Metadata from the first event; later task/detail text is merged into detail.
+# failed always publishes immediately and clears pending. Set 0 to disable.
+# AGENTPING_DEBOUNCE_SEC=180

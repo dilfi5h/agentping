@@ -4,8 +4,7 @@
 #   ./install-macos.sh
 #   ./install-macos.sh --host mac
 # Does NOT touch Linux paths (/usr/local/bin, /etc).
-# Reporter uses the Linux curl version (macOS curl handles UTF-8 titles fine,
-# so no agentping-ntfy-body.py helper needed here).
+# Reporter is the Linux bash wrapper + agentping-ntfy-body.py (publish + debounce).
 # Drops the pi extension into ~/.pi/agent/extensions/ and the opencode
 # plugin into ~/.config/opencode/plugins/.
 set -e
@@ -44,7 +43,9 @@ BIN_DIR="${HOME}/bin"
 mkdir -p "$BIN_DIR"
 
 install -m 755 agent-notify "$BIN_DIR/agent-notify"
+install -m 755 agentping-ntfy-body.py "$BIN_DIR/agentping-ntfy-body.py"
 echo "installed: $BIN_DIR/agent-notify"
+echo "installed: $BIN_DIR/agentping-ntfy-body.py"
 
 mkdir -p "$HOME/.pi/agent/extensions"
 install -m 644 hooks/pi-extension.js "$HOME/.pi/agent/extensions/agentping.js"

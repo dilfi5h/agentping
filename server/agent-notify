@@ -7,7 +7,12 @@
 #   --detail <text>  extra info (≤500 chars)
 #   --session <id>
 #   --dur <ms>
-# Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN > /etc/agentping.conf > ~/.agentping.conf
+# Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN / AGENTPING_DEBOUNCE_SEC
+#   > /etc/agentping.conf > ~/.agentping.conf
+# Debounce (finished/waiting): same session (or host+agent if no session) waits
+#   AGENTPING_DEBOUNCE_SEC seconds (default 180) then publishes one merged notice;
+#   metadata from the first event; subsequent task/detail text appended into detail.
+#   failed publishes immediately and clears pending. Set AGENTPING_DEBOUNCE_SEC=0 to disable.
 # Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
 
 STATE="${1:-}"; shift 2>/dev/null || true
@@ -47,14 +52,14 @@ fi
 [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
 [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
 
-# Priority/emoji mapping (§3.3); started was already swallowed above, only finished/failed/waiting here
+# Priority/emoji mapping (§3.3); started was already swallowed above
 case "$STATE" in
-  finished) PRIO=default; TAGS="robot,white_check_mark";         LABEL="Finished" ;;
-  failed)   PRIO=high;    TAGS="robot,x";                        LABEL="Failed" ;;
-  waiting)  PRIO=high;    TAGS="robot,hourglass_flowing_sand";   LABEL="Awaiting approval" ;;
+  finished) PRIO_N=3; TAGS="robot,white_check_mark" ;;
+  failed)   PRIO_N=4; TAGS="robot,x" ;;
+  waiting)  PRIO_N=4; TAGS="robot,hourglass_flowing_sand" ;;
 esac
 
-# Clip before encoding to avoid cutting inside an escaped \". ${s:0:n} works in bash 3.2.
+# Clip in the shell so env vars stay short; publisher also clips.
 clip() { printf '%s' "${1:0:$2}"; }
 HOST=$(clip "$HOST" 64)
 AGENT=$(clip "$AGENT" 32)
@@ -65,81 +70,30 @@ case "$DUR" in
   ''|*[!0-9]*) DUR="" ;;
 esac
 
-TITLE="[${HOST}] ${AGENT} ${LABEL}"
+# BODY_PY: env > same-dir as this script > ~/bin > /usr/local/bin
+SELF_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || true)
+BODY_PY="${AGENTPING_BODY_PY:-}"
+if [ -z "$BODY_PY" ] && [ -n "$SELF_DIR" ] && [ -f "$SELF_DIR/agentping-ntfy-body.py" ]; then
+  BODY_PY="$SELF_DIR/agentping-ntfy-body.py"
+fi
+if [ -z "$BODY_PY" ] && [ -f "$HOME/bin/agentping-ntfy-body.py" ]; then
+  BODY_PY="$HOME/bin/agentping-ntfy-body.py"
+fi
+if [ -z "$BODY_PY" ] && [ -f /usr/local/bin/agentping-ntfy-body.py ]; then
+  BODY_PY=/usr/local/bin/agentping-ntfy-body.py
+fi
+[ -f "$BODY_PY" ] || { echo "agent-notify: missing agentping-ntfy-body.py" >&2; exit 0; }
 
-# Single-line JSON: prefer python / jq; only fall back to manual escaping when neither exists
-esc() {
-  local s="$1"
-  s="${s//\\/\\\\}"
-  s="${s//\"/\\\"}"
-  s="${s//$'\n'/\\n}"
-  s="${s//$'\t'/ }"
-  s="${s//$'\r'/}"
-  printf '%s' "$s"
-}
+PY=python3
+command -v python3 >/dev/null 2>&1 || PY=python
+command -v "$PY" >/dev/null 2>&1 || { echo "agent-notify: no python3/python" >&2; exit 0; }
 
-build_json() {
-  if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
-    local py=python3
-    command -v python3 >/dev/null 2>&1 || py=python
-    AP_AGENT="$AGENT" AP_HOST="$HOST" AP_STATE="$STATE" \
-    AP_TASK="$TASK" AP_DETAIL="$DETAIL" AP_SESSION="$SESSION" AP_DUR="$DUR" \
-    "$py" -c '
-import json, os
-f = {"v": 1, "agent": os.environ.get("AP_AGENT", ""), "host": os.environ.get("AP_HOST", ""), "state": os.environ.get("AP_STATE", "")}
-for key, env in (("task", "AP_TASK"), ("detail", "AP_DETAIL"), ("session", "AP_SESSION")):
-    v = os.environ.get(env, "")
-    if v:
-        f[key] = v
-dur = os.environ.get("AP_DUR", "")
-if dur.isdigit():
-    f["dur"] = int(dur)
-print(json.dumps(f, ensure_ascii=False, separators=(",", ":")))
-'
-    return
-  fi
-  if command -v jq >/dev/null 2>&1; then
-    jq -nc \
-      --arg agent "$AGENT" \
-      --arg host "$HOST" \
-      --arg state "$STATE" \
-      --arg task "$TASK" \
-      --arg detail "$DETAIL" \
-      --arg session "$SESSION" \
-      --arg dur "$DUR" \
-      '{v:1,agent:$agent,host:$host,state:$state}
-       + (if $task == "" then {} else {task:$task} end)
-       + (if $detail == "" then {} else {detail:$detail} end)
-       + (if $session == "" then {} else {session:$session} end)
-       + (if ($dur | test("^[0-9]+$")) then {dur: ($dur | tonumber)} else {} end)'
-    return
-  fi
-  local json="{\"v\":1,\"agent\":\"$(esc "$AGENT")\",\"host\":\"$(esc "$HOST")\",\"state\":\"$(esc "$STATE")\""
-  [ -n "$TASK" ]    && json="${json},\"task\":\"$(esc "$TASK")\""
-  [ -n "$DETAIL" ]  && json="${json},\"detail\":\"$(esc "$DETAIL")\""
-  [ -n "$SESSION" ] && json="${json},\"session\":\"$(esc "$SESSION")\""
-  [ -n "$DUR" ]     && json="${json},\"dur\":${DUR}"
-  printf '%s' "${json}}"
-}
+export AGENTPING_URL AGENTPING_TOKEN
+# Pass through debounce override if set (also readable from conf via the python helper)
+[ -n "${AGENTPING_DEBOUNCE_SEC+x}" ] && export AGENTPING_DEBOUNCE_SEC
 
-JSON=$(build_json) || { echo "agent-notify: json encode failed" >&2; exit 0; }
-[ -n "$JSON" ] || { echo "agent-notify: empty json" >&2; exit 0; }
-
-# Double-write to the catch-all topic (§3.3): agentping-<host> is kept for the official App, agentping-all for AgentPing
-# Still exit 0 on HTTP errors (hooks must never stall the agent), but print the status so a dead token is visible.
-for TOPIC in "agentping-${HOST}" "agentping-all"; do
-  HTTP=$(curl -m 5 -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer ${AGENTPING_TOKEN}" \
-    -H "Title: ${TITLE}" \
-    -H "Tags: ${TAGS}" \
-    -H "Priority: ${PRIO}" \
-    -H "Markdown: no" \
-    --data-binary "$JSON" \
-    "${AGENTPING_URL}/${TOPIC}" || true)
-  case "$HTTP" in
-    2??) ;;
-    "") echo "agent-notify: POST ${TOPIC} failed (no response)" >&2 ;;
-    *) echo "agent-notify: POST ${TOPIC} http=${HTTP}" >&2 ;;
-  esac
-done
+AP_AGENT="$AGENT" AP_HOST="$HOST" AP_STATE="$STATE" \
+AP_TASK="$TASK" AP_DETAIL="$DETAIL" AP_SESSION="$SESSION" AP_DUR="$DUR" \
+AP_TAGS="$TAGS" AP_PRIO="$PRIO_N" AP_TOPIC_HOST="agentping-${HOST}" \
+"$PY" "$BODY_PY" >/dev/null 2>&1 || true
 exit 0

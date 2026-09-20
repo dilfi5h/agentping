@@ -53,7 +53,9 @@ install_user() {
 }
 
 install -m 755 agent-notify /usr/local/bin/agent-notify
+install -m 755 agentping-ntfy-body.py /usr/local/bin/agentping-ntfy-body.py
 echo "installed: /usr/local/bin/agent-notify"
+echo "installed: /usr/local/bin/agentping-ntfy-body.py"
 
 if [ ! -f /etc/agentping.conf ]; then
   echo "!! Create /etc/agentping.conf manually (chmod 600):"
