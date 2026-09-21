@@ -34,6 +34,7 @@
 // Windows: Node spawn cannot run the bash reporter directly (ENOENT), so call Git Bash with the script path.
 // Duplicate fan-out: the plugin is loaded once per location and the event bus is global, so
 // filter by event.location.directory and collapse same-process repeats via once().
+// Subagent sessions (session.parentID set) are skipped: the user cannot intervene there.
 
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
@@ -68,6 +69,7 @@ const tasks = new Map() // sessionID → latest user prompt
 const failedSent = new Set() // sessionIDs that already pushed failed this turn
 const turnDone = new Set() // sessionIDs that already pushed finished/failed this turn
 const recentlySent = new Map() // dedupeKey → timestamp (same-process multi-location fan-out)
+const childSessions = new Map() // sessionID → true if this is a subagent (has parentID)
 
 function trim(s, n) {
   return String(s == null ? "" : s)
@@ -163,17 +165,38 @@ function errorDetail(err) {
 
 const STEP_FAILED_FINISH = new Set(["error", "content-filter"])
 
+function parentIdOf(info) {
+  return info?.parentID || info?.parent_id || info?.parentSessionID || ""
+}
+
 export default {
   id: "agentping",
   async setup(ctx) {
     const here = ctx?.location?.directory || ""
 
+    // Subagent sessions have parentID. The user cannot intervene there, so skip all
+    // notifications (finished/failed/waiting). Lookup is cached; get() failure → notify
+    // (fail-open so a parent session is never dropped because of a transient miss).
+    async function isChildSession(sid) {
+      if (!sid) return false
+      if (childSessions.has(sid)) return childSessions.get(sid)
+      let child = false
+      try {
+        const info = await ctx.session.get({ sessionID: sid })
+        const row = info && typeof info === "object" && info.data ? info.data : info
+        child = !!parentIdOf(row)
+      } catch {}
+      childSessions.set(sid, child)
+      return child
+    }
+
     // waiting: fire only when the evaluated permission actually asks the user.
     try {
-      await ctx.permission.hook("evaluate", (event) => {
+      await ctx.permission.hook("evaluate", async (event) => {
         try {
           if (event?.effect !== "ask") return
           const sid = event.sessionID || ""
+          if (await isChildSession(sid)) return
           const resources = Array.isArray(event.resources) ? event.resources.filter(Boolean).join(" ") : ""
           const meta = event.metadata && typeof event.metadata === "object" ? event.metadata : {}
           const metaBit = meta.command || meta.pattern || meta.description || ""
@@ -194,6 +217,7 @@ export default {
             const type = event?.type || ""
             const props = payload(event)
             const sid = props.sessionID || ""
+            if (sid && (await isChildSession(sid))) continue
 
             // Cache this round's task as soon as the user prompt is queued.
             if (type === "session.inbox.enqueued") {

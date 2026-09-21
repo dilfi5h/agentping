@@ -166,7 +166,10 @@ hook 内可改 `p.effect`（"deny"/"allow"）与 `p.message`。只有 `effect ==
 
 - 插件是全局的：**每个**正在运行的 opencode 进程都会订阅同一事件流并对同一会话各发一次通知，
   未缓存到 task 的实例发出的通知只有 session id（task 为空）。多会话并存时需要跨进程去重
-  （可用 `ctx.storage`），或保证只跑一个实例。
+  （可用 `ctx.storage`），或保证只跑一个实例。reporter 侧 debounce（`agentping-ntfy-body.py`）再兜一层。
+- **Subagent 不通知**：`ctx.session.get({sessionID})` 返回的对象带 `parentID` 即为子会话
+  （日志里 `mode=subagent` / title 含 `@explore subagent` 是同一类）。子会话用户无法干预，
+  agentping 跳过全部状态（finished/failed/waiting）。查找失败则照常通知（fail-open）。
 - 同一事件在同进程内会被多个插件实例（多 location）重复投递，回调里自己做幂等。
   agentping 按 `event.location.directory === ctx.location.directory` 过滤，再对
   `(session, state, task, detail)` 做短窗口去重。
