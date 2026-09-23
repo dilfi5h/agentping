@@ -31,7 +31,7 @@ Notes:
 - Claude Code / Codex / Gemini CLI are in the protocol (`agent` field) but **not shipped** yet.
 - Windows hooks call Git Bash to run the bash reporter (Node cannot spawn `.sh` scripts directly on Windows).
 
-Current release: [v0.0.13](https://github.com/dilfi5h/agentping/releases/tag/v0.0.13)
+Current release: [v0.0.14](https://github.com/dilfi5h/agentping/releases/tag/v0.0.14)
 
 ## Download the App
 
@@ -143,7 +143,7 @@ Installs:
 
 ```bash
 agent-notify finished --agent pi --task hello
-# started is valid but not published
+# started is valid but not published; it only records a local timestamp for later `dur`
 agent-notify started --task ignored
 ```
 
@@ -160,6 +160,8 @@ agent-notify <started|finished|failed|waiting> [options]
 ```
 
 Any internal error still `exit 0`s — it never drags the agent down.
+
+**`started` and `dur`:** `started` is never published. The reporter stores a local timestamp so a later `finished` / `failed` / `waiting` can fill `dur` (this turn's work time) when `--dur` is omitted. The App shows that as **Gap** between session cards; a long calendar pause is labeled **later**, not Gap.
 
 **Debounce (finished / waiting):** the same session (or `host`+`agent` when `--session` is omitted) waits `AGENTPING_DEBOUNCE_SEC` seconds (default **180**, from the first event) then publishes **one** merged notice. Metadata comes from the first event; later `task` / `detail` text is appended into `detail`. **`failed` is never delayed** and cancels any pending merge for that key. Set `AGENTPING_DEBOUNCE_SEC=0` to disable. Details: [DESIGN.md](DESIGN.md) §3.5.
 

@@ -351,6 +351,7 @@ private fun LazyListScope.timelineSection(
                 entry.message,
                 onDelete,
                 onOpen = { onOpenMessage(entry.message) },
+                showDuration = true,
             )
         }
     }
@@ -365,7 +366,7 @@ private fun SessionTimeline(
     onOpen: (MessageEntity) -> Unit,
 ) {
     val chrono = remember(messages) { chronological(messages) }
-    val gaps = remember(chrono) { gapsFromPrevious(chrono) }
+    val gaps = remember(chrono) { turnGapsFromPrevious(chrono) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(12.dp),
@@ -377,7 +378,7 @@ private fun SessionTimeline(
         items(chrono.size, key = { chrono[it].id }) { index ->
             TimelineNode(
                 message = chrono[index],
-                gapFromPrevious = gaps[index],
+                gapsFromPrevious = gaps[index],
                 isFirst = index == 0,
                 isLast = index == chrono.lastIndex,
                 onDelete = onDelete,
@@ -482,6 +483,7 @@ private fun SwipeDeleteCard(
     m: MessageEntity,
     onDelete: (String) -> Unit,
     onOpen: () -> Unit,
+    showDuration: Boolean = true,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -510,12 +512,12 @@ private fun SwipeDeleteCard(
             }
         },
     ) {
-        MessageCard(m, onOpen)
+        MessageCard(m, onOpen, showDuration)
     }
 }
 
 @Composable
-private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
+private fun MessageCard(m: MessageEntity, onOpen: () -> Unit, showDuration: Boolean = true) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -569,7 +571,7 @@ private fun MessageCard(m: MessageEntity, onOpen: () -> Unit) {
                 Spacer(Modifier.height(4.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium)
             }
-            if (shouldShowDuration(m.stateKind, m.dur)) {
+            if (showDuration && shouldShowDuration(m.stateKind, m.dur)) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "Duration ${formatDuration(m.dur!!)}",
@@ -675,7 +677,7 @@ private fun DetailField(label: String, value: String, mono: Boolean = false) {
 @Composable
 private fun TimelineNode(
     message: MessageEntity,
-    gapFromPrevious: Long?,
+    gapsFromPrevious: List<TurnGap>,
     isFirst: Boolean,
     isLast: Boolean,
     onDelete: (String) -> Unit,
@@ -710,15 +712,18 @@ private fun TimelineNode(
             }
         }
         Column(Modifier.weight(1f).padding(start = 8.dp)) {
-            gapFromPrevious?.let {
+            gapsFromPrevious.forEach { gap ->
                 Text(
-                    "Gap ${formatDuration(it)}",
+                    when (gap) {
+                        is TurnGap.Idle -> "${formatDuration(gap.ms)} later"
+                        is TurnGap.Work -> "Gap ${formatDuration(gap.ms)}"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
             }
-            SwipeDeleteCard(message, onDelete, onOpen)
+            SwipeDeleteCard(message, onDelete, onOpen, showDuration = false)
         }
     }
 }

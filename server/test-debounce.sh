@@ -147,7 +147,65 @@ else
   bad "no-session: missing pending"
 fi
 
-# --- 5) started path is bash-level; body shouldn't be called — smoke syntax ---
+# --- 5) started records a local mark and is never published; finished fills dur ---
+: > "$RECORD"
+rm -rf "$XDG_CACHE_HOME/agentping"
+AGENTPING_DEBOUNCE_SEC=0
+AP_SESSION=s5 AP_TASK=hello run_body started
+n=$(post_count)
+[ "$n" = "0" ] && ok "started never publishes" || bad "started expected 0 posts got $n"
+started_count=$(find "$XDG_CACHE_HOME/agentping/started" -type f 2>/dev/null | wc -l | tr -d ' ')
+[ "$started_count" -ge 1 ] && ok "started wrote a local mark" || bad "expected started mark"
+
+sleep 1
+AP_SESSION=s5 AP_TASK=hello run_body finished
+n=$(post_count)
+dur=$("$PY" -c "import json; print(json.load(open('$RECORD')).get('fields',{}).get('dur', None))")
+if [ "$n" = "1" ] && [ "$dur" != "None" ] && [ "$dur" -ge 500 ]; then
+  ok "finished filled dur from started ($dur ms)"
+else
+  bad "finished dur expected >=500 got n=$n dur=$dur"
+fi
+left=$(find "$XDG_CACHE_HOME/agentping/started" -type f 2>/dev/null | wc -l | tr -d ' ')
+[ "$left" = "0" ] && ok "finished consumed the started mark" || bad "started mark leftover=$left"
+
+# waiting peeks (does not consume); later finished still gets dur
+: > "$RECORD"
+rm -rf "$XDG_CACHE_HOME/agentping"
+AGENTPING_DEBOUNCE_SEC=0
+AP_SESSION=s6 run_body started
+sleep 1
+AP_SESSION=s6 AP_TAGS="robot,hourglass_flowing_sand" AP_PRIO=4 run_body waiting
+n=$(post_count)
+wdur=$("$PY" -c "import json; print(json.load(open('$RECORD')).get('fields',{}).get('dur', None))")
+[ "$n" = "1" ] && [ "$wdur" != "None" ] && ok "waiting filled dur without consuming" || bad "waiting dur n=$n dur=$wdur"
+: > "$RECORD"
+AP_SESSION=s6 run_body finished
+fdur=$("$PY" -c "import json; print(json.load(open('$RECORD')).get('fields',{}).get('dur', None))")
+[ "$fdur" != "None" ] && [ "$fdur" -ge 500 ] && ok "finished still filled dur after waiting peek" || bad "finished after waiting dur=$fdur"
+
+# explicit --dur wins and still consumes the mark
+: > "$RECORD"
+rm -rf "$XDG_CACHE_HOME/agentping"
+AGENTPING_DEBOUNCE_SEC=0
+AP_SESSION=s7 run_body started
+AP_SESSION=s7 AP_DUR=42 run_body finished
+edur=$("$PY" -c "import json; print(json.load(open('$RECORD')).get('fields',{}).get('dur', None))")
+[ "$edur" = "42" ] && ok "explicit --dur wins" || bad "expected dur=42 got $edur"
+left=$(find "$XDG_CACHE_HOME/agentping/started" -type f 2>/dev/null | wc -l | tr -d ' ')
+[ "$left" = "0" ] && ok "explicit --dur still consumed started" || bad "started leftover after explicit dur=$left"
+
+# finished with no started mark: no dur, no stall, no leftover files
+: > "$RECORD"
+rm -rf "$XDG_CACHE_HOME/agentping"
+AGENTPING_DEBOUNCE_SEC=0
+AP_SESSION=s8 AP_TASK=solo run_body finished
+n=$(post_count)
+ndur=$("$PY" -c "import json; print(json.load(open('$RECORD')).get('fields',{}).get('dur', None))")
+[ "$n" = "1" ] && [ "$ndur" = "None" ] && ok "finished without started has no dur" || bad "solo finished n=$n dur=$ndur"
+[ ! -d "$XDG_CACHE_HOME/agentping/started" ] && ok "finished without started did not create started dir" || bad "unexpected started dir"
+
+# --- 6) bash / python syntax ---
 bash -n ./agent-notify && ok "bash -n agent-notify" || bad "bash -n agent-notify"
 bash -n ./agent-notify.win && ok "bash -n agent-notify.win" || bad "bash -n agent-notify.win"
 "$PY" -m py_compile ./agentping-ntfy-body.py && ok "py_compile body.py" || bad "py_compile body.py"

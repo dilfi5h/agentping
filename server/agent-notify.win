@@ -7,6 +7,7 @@ export PYTHONIOENCODING=utf-8
 # Publishes via python urllib (avoids curl header mojibake with non-ASCII text)
 # Config sources: env vars > /etc/agentping.conf > ~/.agentping.conf
 # Debounce: same as Linux agent-notify (see DESIGN.md §3.5); AGENTPING_DEBOUNCE_SEC
+# started is never published; the helper records a local timestamp so finished can fill dur.
 # Any internal error → one stderr line + exit 0
 
 STATE="${1:-}"; shift 2>/dev/null || true
@@ -32,8 +33,6 @@ done
 
 [ -n "$STATE" ] || { echo "agent-notify: missing state" >&2; exit 0; }
 case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad state '$STATE'" >&2; exit 0 ;; esac
-[ "$STATE" = "started" ] && exit 0
-
 if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
   if [ -f /etc/agentping.conf ]; then
     . /etc/agentping.conf
@@ -41,13 +40,17 @@ if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
     . "$HOME/.agentping.conf"
   fi
 fi
-[ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
-[ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
+# started still needs the python helper (local timestamp for later dur) even without creds.
+if [ "$STATE" != "started" ]; then
+  [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
+  [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
+fi
 
 case "$STATE" in
   finished) PRIO_N=3; TAGS="robot,white_check_mark" ;;
   failed)   PRIO_N=4; TAGS="robot,x" ;;
   waiting)  PRIO_N=4; TAGS="robot,hourglass_flowing_sand" ;;
+  started)  PRIO_N=0; TAGS="" ;;
 esac
 
 # BODY_PY: env > same-dir as this script > ~/bin

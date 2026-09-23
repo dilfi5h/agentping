@@ -106,11 +106,54 @@ internal fun sessionSpanMs(messages: List<MessageEntity>): Long? {
 internal fun chronological(messages: List<MessageEntity>): List<MessageEntity> =
     messages.sortedWith(compareBy<MessageEntity> { it.time }.thenBy { it.id })
 
-internal fun gapsFromPrevious(messagesChrono: List<MessageEntity>): List<Long?> =
+/**
+ * Marker between two consecutive session messages.
+ *
+ * - [TurnGap.Work] is this turn's agent work time (`dur` when present).
+ *   Falling back to the wall-clock delta is only allowed when that delta is
+ *   still a plausible turn (≤ [MAX_IMPLIED_WORK_MS]); a long sleep must not
+ *   become "Gap 8h".
+ * - [TurnGap.Idle] is the leftover calendar idle after subtracting work.
+ *   Shown only when it is long enough to be a real pause ([MIN_IDLE_MS]).
+ */
+internal sealed interface TurnGap {
+    data class Work(val ms: Long) : TurnGap
+    data class Idle(val ms: Long) : TurnGap
+}
+
+/** Longer than this, a missing-dur wall-clock delta is idle, not work. */
+internal const val MAX_IMPLIED_WORK_MS = 30L * 60_000L
+
+/** Shorter than this, leftover idle is not worth a "later" label. */
+internal const val MIN_IDLE_MS = 30L * 60_000L
+
+internal fun turnGapsFromPrevious(messagesChrono: List<MessageEntity>): List<List<TurnGap>> =
     messagesChrono.mapIndexed { index, message ->
-        if (index == 0) null
-        else (message.time - messagesChrono[index - 1].time).coerceAtLeast(0L)
+        if (index == 0) firstTurnGaps(message)
+        else turnGapsBetween(messagesChrono[index - 1], message)
     }
+
+internal fun firstTurnGaps(message: MessageEntity): List<TurnGap> {
+    val work = message.dur?.takeIf { it > 0L } ?: return emptyList()
+    return listOf(TurnGap.Work(work))
+}
+
+internal fun turnGapsBetween(previous: MessageEntity, current: MessageEntity): List<TurnGap> {
+    val wall = (current.time - previous.time).coerceAtLeast(0L)
+    val work = workMsOf(current, wall)
+    val idle = (wall - (work ?: 0L)).coerceAtLeast(0L)
+    return buildList {
+        if (idle >= MIN_IDLE_MS) add(TurnGap.Idle(idle))
+        if (work != null && work > 0L) add(TurnGap.Work(work))
+    }
+}
+
+private fun workMsOf(current: MessageEntity, wall: Long): Long? {
+    val dur = current.dur
+    if (dur != null && dur > 0L) return dur
+    if (wall in 1L..MAX_IMPLIED_WORK_MS) return wall
+    return null
+}
 
 /** Card timestamps and "Today" / "Earlier" use UTC+8 so multi-server clocks stay unambiguous. */
 internal val DISPLAY_ZONE: ZoneId = ZoneId.of("Asia/Shanghai")

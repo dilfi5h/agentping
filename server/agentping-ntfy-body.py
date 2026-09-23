@@ -5,6 +5,10 @@
 #   (default) gate + publish-or-defer
 #   --flush <keyhash> [sleep_sec]  sleep remaining window then publish merged pending
 #
+# started: never published. Persist a per-key timestamp so a later finished/failed/waiting
+# can fill `dur` (this turn's work time) when the caller did not pass --dur.
+# Started files live under ${XDG_CACHE_HOME:-~/.cache}/agentping/started/<keyhash>.
+#
 # Debounce: finished/waiting share a per-key window (default 180s from first event).
 # Metadata (agent/host/state/session/title/tags/priority/task) from the first event;
 # subsequent task/detail text is appended into detail. failed publishes immediately
@@ -37,6 +41,8 @@ LABELS = {
 PUBLISH_TIMEOUT_SEC = 2.0
 DEFAULT_DEBOUNCE_SEC = 180
 DETAIL_MAX = 500
+# Ignore a started mark older than this when filling dur (stale / abandoned turn).
+MAX_TURN_MS = 24 * 3600 * 1000
 
 try:
     DEVNULL = subprocess.DEVNULL
@@ -62,13 +68,21 @@ def _debounce_sec():
         return DEFAULT_DEBOUNCE_SEC
 
 
-def _cache_root():
+def _agentping_cache_root():
     xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
     if xdg:
         base = xdg
     else:
         base = os.path.join(os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "agentping", "debounce")
+    return os.path.join(base, "agentping")
+
+
+def _cache_root():
+    return os.path.join(_agentping_cache_root(), "debounce")
+
+
+def _started_root():
+    return os.path.join(_agentping_cache_root(), "started")
 
 
 def _key_raw(host, session, agent):
@@ -85,10 +99,78 @@ def _pending_dir(keyhash):
     return os.path.join(_cache_root(), keyhash)
 
 
+def _started_path(keyhash):
+    return os.path.join(_started_root(), keyhash)
+
+
+def _mark_started(host, session, agent):
+    """Record this turn's start time. Never publishes."""
+    keyhash = _key_hash(host, session, agent)
+    parent = _started_root()
+    try:
+        os.makedirs(parent, exist_ok=True)
+    except Exception:
+        return
+    now_ms = int(time.time() * 1000)
+    with _dir_lock(os.path.join(parent, keyhash)):
+        try:
+            _write_json(_started_path(keyhash), {"t": now_ms})
+        except Exception:
+            pass
+
+
+def _started_dur(host, session, agent, consume):
+    """Elapsed ms since started, or None. waiting peeks; finished/failed consume."""
+    keyhash = _key_hash(host, session, agent)
+    parent = _started_root()
+    path = _started_path(keyhash)
+    if not os.path.isdir(parent):
+        return None
+    elapsed = None
+    with _dir_lock(os.path.join(parent, keyhash)):
+        meta = _read_json(path, None)
+        if consume:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        if meta:
+            try:
+                t = int(meta.get("t") or 0)
+            except (TypeError, ValueError):
+                t = 0
+            if t > 0:
+                delta = int(time.time() * 1000) - t
+                if 0 < delta <= MAX_TURN_MS:
+                    elapsed = delta
+    return elapsed
+
+
+def _attach_dur(fields, host, session, agent):
+    """Fill dur from a recorded started mark when the caller did not pass --dur.
+
+    finished/failed consume the mark so a later turn cannot inherit a stale start.
+    waiting peeks so a later finished in the same turn can still compute dur.
+    """
+    state = fields.get("state", "")
+    consume = state != "waiting"
+    if fields.get("dur") is not None:
+        if consume:
+            _started_dur(host, session, agent, consume=True)
+        return
+    dur = _started_dur(host, session, agent, consume=consume)
+    if dur is not None:
+        fields["dur"] = dur
+
+
 @contextmanager
 def _dir_lock(path):
     """mkdir-based lock (works on Linux / macOS / Windows without flock)."""
     lock = path + ".lock"
+    lock_parent = os.path.dirname(lock)
+    if lock_parent and not os.path.isdir(lock_parent):
+        yield False
+        return
     acquired = False
     for _ in range(100):
         try:
@@ -340,16 +422,24 @@ def flush_pending(keyhash, sleep_sec=None):
 
 
 def gate_and_publish():
-    url, token = _resolve_creds()
-    if not url or not token:
-        _eprint("agentping-ntfy-body: missing url/token")
-        return 0
-
     fields, tags, prio, host_topic = _fields_from_env()
     state = fields.get("state", "")
     host = fields.get("host", "unknown")
     agent = fields.get("agent", "shell")
     session = fields.get("session", "")
+
+    # started is never published; only a local timestamp so finished can fill dur.
+    if state == "started":
+        _mark_started(host, session, agent)
+        return 0
+
+    _attach_dur(fields, host, session, agent)
+
+    url, token = _resolve_creds()
+    if not url or not token:
+        _eprint("agentping-ntfy-body: missing url/token")
+        return 0
+
     keyhash = _key_hash(host, session, agent)
     sec = _debounce_sec()
 

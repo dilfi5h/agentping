@@ -8,7 +8,7 @@
 Status: design finalized 2026-09-12. Progress: M1 server ✅ (§5), M3 App MVP ✅ (v0.0.1 released,
 repo github.com/dilfi5h/agentping, verification via tag→CI→deb fetch), M2 in progress (agent-notify ✅ +
 pi/opencode hooks ✅, claude not wired).
-Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double-writes to the catch-all topic (§3.3/§3.4); ② waiting is a read-only snapshot with no resolution event; ③ hook paths don't carry `dur` (only the L2 wrapper provides it); ④ timeline sorting always uses the ntfy frame's `time`; `ts` is display-only.
+Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double-writes to the catch-all topic (§3.3/§3.4); ② waiting is a read-only snapshot with no resolution event; ③ `started` is never published, but the reporter records a local timestamp so hook-path finished/failed/waiting can fill `dur`; ④ timeline sorting always uses the ntfy frame's `time`; `ts` is display-only. Session-timeline **Gap** is this turn's `dur` (work), not the wall-clock delta between cards; a long pause is labeled **later**.
 
 ## 1. Goals and Non-Goals
 
@@ -86,7 +86,7 @@ Effects:
 | `detail` | string | ❌ | Extra info ≤500 chars: exit code, error message, the exact command of a permission request |
 | `session` | string | ❌ | Session identifier (passed through verbatim; the App V1 only displays it). The addressing key for V2 remote operations |
 | `ts` | long | ❌ | Millisecond timestamp on the reporter's clock, **display only**. Defaults to ntfy's store time. Multi-server clock drift is untrusted; timeline sorting always uses the ntfy frame's own `time` |
-| `dur` | long | ❌ | Task duration in ms, meaningful only for finished/failed. **Not provided on the hook path** (hooks are stateless single-shot processes); only the `agentping run` process wrapper can compute it |
+| `dur` | long | ❌ | Task duration in ms, meaningful for finished/failed/waiting. The `agentping run` wrapper passes `--dur`. On the hook path the reporter records a local timestamp on `started` (still not published) and fills `dur` on the later event. The App uses `dur` as the session-timeline **Gap** (this turn's work, including the first card); a long calendar pause between cards is labeled **later**, not Gap. Session cards hide the on-card Duration line so it does not duplicate Gap |
 
 **Validation rules** (lenient on the App side, strict on the reporter side):
 
@@ -142,7 +142,7 @@ agent-notify <state> [options]
 Config sources (priority): env vars AGENTPING_URL / AGENTPING_TOKEN / AGENTPING_DEBOUNCE_SEC
   > /etc/agentping.conf (KEY=VALUE) > ~/.agentping.conf
 Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
-started: a legal state, hooks may keep calling; the reporter exits 0 silently without POSTing (one choke point, so each agent's hook needs no change)
+started: a legal state, hooks may keep calling; the reporter never POSTs it. It records a local timestamp (`${XDG_CACHE_HOME:-~/.cache}/agentping/started/<keyhash>`) so a later finished/failed/waiting can fill `dur` when `--dur` is omitted. Same key as debounce. Marks older than 24h are ignored.
 ```
 
 **Session debounce** (anti-flood, reporter-side choke point — ntfy has no per-session merge):
@@ -152,7 +152,7 @@ started: a legal state, hooks may keep calling; the reporter exits 0 silently wi
 - Applies to **`finished` / `waiting` only**. Window end publishes **one** notice: agent / host / state / session / title / tags / priority / task from the **first** event; subsequent events append their task/detail **text** into `detail` (newline-joined, clipped to 500, earliest kept).
 - **`failed` always publishes immediately** and **clears** any pending debounce for that key (so a later flush cannot emit a stale finished/waiting).
 - Pending state: `${XDG_CACHE_HOME:-~/.cache}/agentping/debounce/<keyhash>/` (`meta.json` + `parts.jsonl`). A detached sleeper process flushes; the hook itself never waits on the window.
-- Linux / macOS / Windows share `agentping-ntfy-body.py` for publish + debounce (bash wrappers only assemble env).
+- Linux / macOS / Windows share `agentping-ntfy-body.py` for publish + debounce + started-timestamp `dur` (bash wrappers only assemble env). The wrappers no longer swallow `started` before calling the helper.
 
 ### 3.6 Per-Agent Hook Wiring (M2 scope: pi + opencode + Claude Code)
 
@@ -234,7 +234,7 @@ Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/code
 ## 8. Development Flow (user-approved)
 
 1. Each feature: build a verification package locally → scp to deb's `/dl/` (small packages transfer directly / large ones go through CI-release+deb fetch, the old rules) → **verify on a real device**
-2. Only after a real device passes + the user approves → commit/push/tag (semantic `v0.0.x`: start status push at 0.1.0? No — keep PiPilot's manual 0.0.x convention, versionCode +1 per verification build)
+2. Only after a real device passes + the user approves → commit/push/tag (semantic `v0.0.x`)
 3. Intermediate verification builds use a temporary `v0.0.x-verifyN` tag + temporary Release channel, deleted once the formal one is out (flow already proven on PiPilot v0.0.11)
 4. Don't watch CI when CI hasn't changed
 

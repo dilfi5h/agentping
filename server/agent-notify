@@ -13,6 +13,8 @@
 #   AGENTPING_DEBOUNCE_SEC seconds (default 180) then publishes one merged notice;
 #   metadata from the first event; subsequent task/detail text appended into detail.
 #   failed publishes immediately and clears pending. Set AGENTPING_DEBOUNCE_SEC=0 to disable.
+# started: never published. The helper records a local timestamp so a later
+# finished/failed/waiting can fill dur (this turn's work time) when --dur is omitted.
 # Behavior contract: any internal error → one stderr line + exit 0; never blocks, never changes the agent's exit code
 
 STATE="${1:-}"; shift 2>/dev/null || true
@@ -39,9 +41,6 @@ done
 [ -n "$STATE" ] || { echo "agent-notify: missing state" >&2; exit 0; }
 case "$STATE" in started|finished|failed|waiting) ;; *) echo "agent-notify: bad state '$STATE'" >&2; exit 0 ;; esac
 
-# started is frequent and carries no action value: CLI/hooks may still pass it, it's valid but not published (exit 0)
-[ "$STATE" = "started" ] && exit 0
-
 if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
   if [ -f /etc/agentping.conf ]; then
     . /etc/agentping.conf
@@ -49,14 +48,18 @@ if [ -z "$AGENTPING_URL" ] || [ -z "$AGENTPING_TOKEN" ]; then
     . "$HOME/.agentping.conf"
   fi
 fi
-[ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
-[ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
+# started still needs the python helper (local timestamp for later dur) even without creds.
+if [ "$STATE" != "started" ]; then
+  [ -n "$AGENTPING_URL" ]   || { echo "agent-notify: no AGENTPING_URL" >&2; exit 0; }
+  [ -n "$AGENTPING_TOKEN" ] || { echo "agent-notify: no AGENTPING_TOKEN" >&2; exit 0; }
+fi
 
-# Priority/emoji mapping (§3.3); started was already swallowed above
+# Priority/emoji mapping (§3.3); started is never published
 case "$STATE" in
   finished) PRIO_N=3; TAGS="robot,white_check_mark" ;;
   failed)   PRIO_N=4; TAGS="robot,x" ;;
   waiting)  PRIO_N=4; TAGS="robot,hourglass_flowing_sand" ;;
+  started)  PRIO_N=0; TAGS="" ;;
 esac
 
 # Clip in the shell so env vars stay short; publisher also clips.
