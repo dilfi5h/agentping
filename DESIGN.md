@@ -237,6 +237,7 @@ Notes: the ntfy `server.yml` / systemd unit, `docs/protocol.md`, and claude/code
 2. Only after a real device passes + the user approves → commit/push/tag (semantic `v0.0.x`)
 3. Intermediate verification builds use a temporary `v0.0.x-verifyN` tag + temporary Release channel, deleted once the formal one is out (flow already proven on PiPilot v0.0.11)
 4. Don't watch CI when CI hasn't changed
+5. Workflow action versions are kept on the latest major (2026-10: `actions/checkout@v7`, `actions/setup-java@v6`, `gradle/actions/setup-gradle@v6`, `softprops/action-gh-release@v3`). Note: `setup-gradle@v6` bundles `gradle-actions-caching`, a proprietary component under the Gradle Terms of Use (MIT no longer covers caching); the others are runtime/dependency bumps (Node 24) with no change to the inputs we use — `setup-java@v6` additionally moved to ESM and dropped the legacy `adopt*` distributions, which we don't use (`temurin`)
 
 ## 9. Milestones
 
