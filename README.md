@@ -176,7 +176,7 @@ For pi / opencode, `finished` / `failed` **must carry a summary of this round's 
 
 ## Protocol at a glance
 
-The ntfy `Title` is human-readable, e.g. `[deb] pi Finished`; `message` is a single-line JSON:
+The ntfy `title` is human-readable, e.g. `[deb] pi Finished`; `message` is a single-line JSON:
 
 ```json
 {
@@ -190,6 +190,7 @@ The ntfy `Title` is human-readable, e.g. `[deb] pi Finished`; `message` is a sin
 ```
 
 The reporter double-publishes to `agentping-<host>` and `agentping-all` (ntfy publishing doesn't support comma-separated multi-topic).  
+On the wire it is ntfy's **JSON publish body** POSTed to the base URL — `topic` / `title` / `tags` / `priority` in the body, the payload JSON as the `message` string, two POSTs (one per topic). Details: [DESIGN.md](DESIGN.md) §3.3.  
 The App only subscribes to `agentping-all`. Full fields and validation rules: see [DESIGN.md](DESIGN.md).
 
 ## Development

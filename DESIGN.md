@@ -32,16 +32,17 @@ Additional decisions (2026-09-12 kickoff): ① topic discovery = reporter double
 ```
 ┌─ server (deb etc.) ────────────────────────┐      ┌─ phone ──────────────┐
 │ agent(hook) ─▶ agent-notify ──HTTPS POST──┼─▶ ntfy ─WebSocket─▶ AgentPing │
-│            (~30-line script: JSON + curl)   │    (systemd,    foreground    │
+│            (bash wrapper + body.py: JSON)   │    (systemd,    foreground    │
 │ agentping run <cmd> (process-wrap fallback) │    read-only token) service+Room │
 └────────────────────────────────────────────┘      └────────────────────────┘
 ```
 
 Component responsibilities:
 
-- **agent-notify** (server, ~30 lines of bash): the only server-side program. Assembles the
-  JSON, curl POSTs to ntfy with a token, 5s timeout, exits 0 silently on any error
-  (never affects the agent itself)
+- **agent-notify** (server: bash wrapper + `agentping-ntfy-body.py`): the only server-side
+  program. The wrapper resolves state/config and tags; the Python helper assembles the JSON,
+  applies debounce and `dur`, and POSTs to ntfy with a token (2s timeout). Any internal error →
+  one stderr line + exit 0 (never affects the agent itself)
 - **ntfy** (server, official single binary + systemd): the message bus. Ships auth, offline
   cache, topic permissions, keepalive. Zero custom code
 - **AgentPing App** (Android): a foreground service holding one WebSocket subscription for all
@@ -96,27 +97,28 @@ Effects:
 
 ### 3.3 ntfy Publish Request (reporter → ntfy)
 
+One publishing style: **ntfy's JSON publish body, POSTed to the base URL**. `topic` / `title` /
+`tags` / `priority` live in the body, and the payload JSON (§3.2) is carried as the `message`
+string — so the payload is escaped one extra level.
+
 ```bash
-# Double-write to the catch-all topic: ntfy publishing doesn't support comma-separated multi-topic (only subscribing does), so it's two POSTs
-curl -m 5 -s -o /dev/null \
+# Two POSTs, both to the base URL (not /<topic>): ntfy's JSON publish takes "topic" in the body.
+# Publishing doesn't support comma-separated multi-topic (only subscribing does), so it's two requests.
+curl -m 2 -s -o /dev/null \
   -H "Authorization: Bearer tk_publish_xxx" \
-  -H "Title: [deb] pi Awaiting approval" \
-  -H "Tags: robot,hourglass" \
-  -H "Priority: high" \
-  -H "Markdown: no" \
-  -d '{"v":1,"agent":"pi",...}' \
-  https://ntfy.871116.xyz/agentping-deb
-curl -m 5 -s -o /dev/null \
-  -H "Authorization: Bearer tk_publish_xxx" -H "Title: ..." \
-  -d '{"v":1,...}' \
-  https://ntfy.871116.xyz/agentping-all
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{"topic":"agentping-deb","title":"[deb] pi Awaiting approval","message":"{\"v\":1,\"agent\":\"pi\",\"host\":\"deb\",\"state\":\"waiting\",\"task\":\"fix login bug\",\"detail\":\"permission.ask: Bash(rm -rf /tmp/x)\",\"session\":\"sess_fe97e70b\",\"dur\":123000}","tags":["robot","hourglass_flowing_sand"],"priority":4,"markdown":false}' \
+  https://ntfy.871116.xyz/
+# second POST: identical body, "topic":"agentping-all"
 ```
 
-- **Double-write to the catch-all topic (the topic-discovery mechanism)**: the reporter POSTs once each to `agentping-<host>` and `agentping-all`. The AgentPing App subscribes only to `agentping-all`, so adding a new server needs zero App configuration; `agentping-<host>` stays available for the official ntfy App to subscribe per machine / debug
-- Carry title/tags/priority in HTTP headers (a JSON publish body works too — pick one; we standardize on header + body, where the body is the payload JSON, avoiding double escaping)
+- **Double-write to the catch-all topic (the topic-discovery mechanism)**: the reporter POSTs once each to `agentping-<host>` and `agentping-all` (two parallel requests, `ThreadPoolExecutor(2)` in `_publish_fields`). The AgentPing App subscribes only to `agentping-all`, so adding a new server needs zero App configuration; `agentping-<host>` stays available for the official ntfy App to subscribe per machine / debug
+- **Why the body instead of headers**: `topic` has to travel in the body anyway (the base URL carries none), so header publishing would split one message across path + headers + body. Keeping a single JSON object gives both POSTs one code path (`_publish_fields`) and passes the (possibly CJK) `task` / `detail` through as UTF-8 without any header encoding. `markdown:false` stops ntfy from rendering the message. Sending `Title` / `Tags` / `Priority` as headers and POSTing to `/agentping-<host>` is equally valid ntfy, but it is **not** what ships — `server/agentping-ntfy-body.py` is the single source of truth
+- **`message`** = single-line payload JSON (§3.2), exactly one escape level in the request body. The App parses it; the official ntfy App / SMS fallback just shows the raw JSON text
+- **Timestamp**: the reporter does **not** send `ts` (it is display-only and untrusted anyway); the App always sorts by the ntfy frame's `time`
 - **Priority mapping**: started=**don't push** (the reporter exits 0 directly on `started`) / finished=default(3) / failed=high(4) / waiting=high(4). urgent(5) is reserved for V2 manual testing
 - **tags (ntfy emoji)**: `robot` always; per state: finished=`white_check_mark`, failed=`x`, waiting=`hourglass_flowing_sand` (started isn't published, no tag)
-- 5s timeout, silent failure — a hook must never stall the agent
+- **2s timeout** (`PUBLISH_TIMEOUT_SEC` in the helper; the old 5s curl contract is gone), silent failure — a hook must never stall the agent
 
 ### 3.4 App Subscription Protocol (ntfy JSON stream)
 
