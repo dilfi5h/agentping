@@ -26,6 +26,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -43,6 +44,75 @@ DEFAULT_DEBOUNCE_SEC = 180
 DETAIL_MAX = 500
 # Ignore a started mark older than this when filling dur (stale / abandoned turn).
 MAX_TURN_MS = 24 * 3600 * 1000
+
+# CA bundles tried when the interpreter's default store is empty. Homebrew pythons can point
+# default_verify_paths at a cert.pem the formula never installed (e.g. /usr/local/etc/openssl@4/
+# cert.pem) — the store silently contains 0 certs and every publish dies with
+# CERTIFICATE_VERIFY_FAILED while still taking the "never blocks" silent path.
+CA_BUNDLES = (
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/usr/local/etc/openssl/cert.pem",
+    "/usr/local/etc/openssl@3/cert.pem",
+    "/opt/homebrew/etc/openssl/cert.pem",
+    "/opt/homebrew/etc/openssl@3/cert.pem",
+)
+
+_tls = {"done": False, "context": None}
+_tls_lock = threading.Lock()
+
+
+def _has_ca_certs(ctx):
+    try:
+        return ctx.cert_store_stats().get("x509_ca", 0) > 0
+    except Exception:
+        return True  # py2 / unknown: trust the interpreter default
+
+
+def _tls_context():
+    """TLS context that actually verifies, or None (no ssl / py2 without context support).
+
+    Built once under a lock: _publish_fields posts two topics from two threads, and a
+    half-initialised cache would hand one of them the empty default store.
+    """
+    with _tls_lock:
+        if _tls["done"]:
+            return _tls["context"]
+        _tls["context"] = _build_tls_context()
+        _tls["done"] = True
+        return _tls["context"]
+
+
+def _build_tls_context():
+    try:
+        import ssl
+    except Exception:
+        return None
+    try:
+        ctx = ssl.create_default_context()
+    except Exception:
+        return None
+    if not _has_ca_certs(ctx):
+        env_ca = os.environ.get("SSL_CERT_FILE", "")
+        candidates = [env_ca] + list(CA_BUNDLES)
+        try:
+            import certifi  # optional; only when already installed
+            candidates.append(certifi.where())
+        except Exception:
+            pass
+        for path in candidates:
+            if not path or not os.path.isfile(path):
+                continue
+            try:
+                ctx.load_verify_locations(cafile=path)
+            except Exception:
+                continue
+            if _has_ca_certs(ctx):
+                break
+    return ctx
+
 
 try:
     DEVNULL = subprocess.DEVNULL
@@ -262,7 +332,11 @@ def _post(url, token, data, topic):
             "Content-Type": "application/json; charset=utf-8",
         },
     )
-    with urllib.request.urlopen(req, timeout=PUBLISH_TIMEOUT_SEC) as resp:
+    kwargs = {}
+    ctx = _tls_context() if url.lower().startswith("https:") else None
+    if ctx is not None:
+        kwargs["context"] = ctx
+    with urllib.request.urlopen(req, timeout=PUBLISH_TIMEOUT_SEC, **kwargs) as resp:
         code = getattr(resp, "status", None) or resp.getcode()
         resp.read()
         if int(code) < 200 or int(code) >= 300:

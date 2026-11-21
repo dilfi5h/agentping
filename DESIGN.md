@@ -155,6 +155,7 @@ started: a legal state, hooks may keep calling; the reporter never POSTs it. It 
 - **`failed` always publishes immediately** and **clears** any pending debounce for that key (so a later flush cannot emit a stale finished/waiting).
 - Pending state: `${XDG_CACHE_HOME:-~/.cache}/agentping/debounce/<keyhash>/` (`meta.json` + `parts.jsonl`). A detached sleeper process flushes; the hook itself never waits on the window.
 - Linux / macOS / Windows share `agentping-ntfy-body.py` for publish + debounce + started-timestamp `dur` (bash wrappers only assemble env). The wrappers no longer swallow `started` before calling the helper.
+- **TLS verification**: publish uses the interpreter's default CA store. If that store is empty (a Homebrew python whose `openssl@N` formula shipped no `cert.pem`, so `default_verify_paths()` points at a missing file — the "never blocks" contract then hides every publish failure), the helper loads the first usable bundle from `SSL_CERT_FILE`, the common distro/macOS paths, or `certifi`. Installed 2026-11-21 after `python@3.15` broke every notification on the macOS dev box.
 
 ### 3.6 Per-Agent Hook Wiring (M2 scope: pi + opencode + Claude Code)
 
