@@ -16,7 +16,7 @@ agentping 的编译和单测跑在 instabox 的 Linux 盒子上，本地只负�
 | 用户 | `user`，免密 sudo（老模板的用户名是 `user`，不是本机用户名） |
 | Gradle | 8.9，装在 `/opt/gradle-8.9`，软链到 `/usr/local/bin/gradle` |
 | Android SDK | `/data/android-sdk`：`platforms;android-35`、`build-tools;35.0.0`、`build-tools;34.0.0`（AGP 8.7.3 默认要 34）、`platform-tools` |
-| JDK | apt 装的 OpenJDK 21（`openjdk-21-jdk-headless`；Gradle 8.9 / AGP 8.7.3 / Kotlin 2.0.21 都支持） |
+| JDK | OpenJDK 21（当前 `21.0.12.1`；换机器时缺就 `sudo apt-get install -y openjdk-21-jdk-headless`。Gradle 8.9 / AGP 8.7.3 / Kotlin 2.0.21 都支持） |
 | Gradle init | `~/.gradle/init.d/prefer-official-repos.gradle`：盒子上移除 aliyun 镜像，只用官方 `google()` / `mavenCentral()` |
 | 签名 | `agentping-release.keystore` + `keystore.properties` 已放在仓库根，被 `.gitignore` 忽略，不走同步 |
 | `local.properties` | 内容 `sdk.dir=/data/android-sdk`，同样被忽略，不走同步 |
@@ -42,7 +42,7 @@ tools/instabox-build.sh
 
 单测失败时脚本以非 0 退出，不会拉 APK。
 
-耗时参考：首次（下依赖）约 2 分钟；无改动（`--offline`）约 30 秒，主要是同步代码的开销；改几个 Kotlin 文件约 1 分钟。
+耗时参考：空缓存首次（下依赖）约 2–7 分钟，看网络；有缓存后无改动（`--offline`）约 30 秒。
 
 ## 上传代码
 
