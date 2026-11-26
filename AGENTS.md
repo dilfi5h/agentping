@@ -17,30 +17,42 @@
 
 ## 2. 修改代码
 
-把定稿方案落到 Kotlin / Compose
+把定稿方案落到 Kotlin / Compose。
+
 测试或行为不对：停在这一层修，不要带着红测试去打包。
 
-## 4. 本地打 release 包
+## 3. 打 release 包
 
 真机验证用 **signed release**（R8 minify + shrink），debug 包过不了 ProGuard / 覆盖安装。`versionCode` 和 `versionName` 仍按用户的 `0.0.x` 约定，未正式发版不要改。
+
+默认在 instabox 的 Linux 盒子上编译，本机不用装 Android SDK，一条命令同步代码、跑单测、打包并拉回 APK：
+
+```bash
+tools/instabox-build.sh
+```
+
+只允许用现有的盒子 `ib`。**不要自行 `instabox create` 新机器**：新增 / 重建机器必须先得到用户明确同意。
+
+细节（盒子规格、上传代码 / 下载 APK、手动命令、重建盒子）见 [`INSTABOX.md`](INSTABOX.md)。编译完不用就 `instabox suspend ib`。
+
+想在本机打也可以：
 
 ```bash
 gradle :app:testDebugUnitTest --offline
 gradle assembleRelease
 ```
 
-产物：`app/build/outputs/apk/release/agentping-release.apk`。
+产物都是 `app/build/outputs/apk/release/app-release.apk`（两处签名同一把钥匙，可互相覆盖安装）。
 
+打包失败（R8、资源、签名）回到第 2 步改代码或 ProGuard，不要让用户装坏包。
 
-打包失败（R8、资源、签名）回到第 3 步改代码或 ProGuard，不要让用户装坏包。
-
-## 5. 用户真机测试
+## 4. 用户真机测试
 
 把 APK 交给用户在已装 AgentPing 的手机上覆盖安装。Agent 不要假设本机有 `adb`。
 
-请用户确认：新功能、回归（时间线、通知、重连、会话 Gap）。有问题记下复现，**退回对应步骤**（观感 → 第 2 步；逻辑 / 崩溃 → 第 3 步；装不上 → 第 4 步），再重新打包，不要直接推。
+请用户确认：新功能、回归（时间线、通知、重连、会话 Gap）。有问题记下复现，**退回对应步骤**（观感 → 第 2 步；逻辑 / 崩溃 → 第 2 步；装不上 → 第 3 步），再重新打包，不要直接推。
 
-## 6. 推送代码
+## 5. 推送代码
 
 真机通过后再提交、推远程。
 
