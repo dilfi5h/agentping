@@ -199,7 +199,7 @@ The App only subscribes to `agentping-all`. Full fields and validation rules: se
 - Release builds are R8-minified (`isMinifyEnabled`) with resource shrinking (`isShrinkResources`); keep rules live in `app/proguard-rules.pro`
 - Push to `main` → CI updates the `dev` prerelease APK
 - Tag `v*` → CI builds the release APK
-- Local signed build on an instabox Linux box (no Android SDK needed on the Mac): `tools/instabox-build.sh` — see [INSTABOX.md](INSTABOX.md)
+- Unit tests and release builds run on an instabox Linux box (no Android SDK needed on the Mac): `tools/instabox-build.sh` — see [INSTABOX.md](INSTABOX.md)
 
 Architecture, auth, battery details and milestones: see [DESIGN.md](DESIGN.md).
 

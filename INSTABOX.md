@@ -1,11 +1,16 @@
 # INSTABOX
 
-agentping 的编译和单测跑在 instabox 的 Linux 盒子上，本地只负责改代码、装 APK。
+agentping 的单测和打包都跑在 instabox 的 Linux 盒子上，本地只负责改代码、装 APK。
 盒子里有完整的 gradle / Android SDK / 签名，本机不需要装 Android SDK 也能出 release 包。
+
+**单测和打包只在盒子上跑，本机不跑 gradle。** 不要为了「先本地验一下」在本机执行 `testDebugUnitTest` / `assembleRelease`。
 
 **只用现有的 `ib`，不要自行开新机器。** Agent 不许自己 `instabox create` / `instabox fork`：
 新增机器（含换名重建）必须先向用户说明原因并拿到明确同意。free plan 机器数有上限，
 多出来的机器会占配额、容易和别的项目混在一起。
+
+**盒子上的单测或打包失败就停下来问用户。** `tools/instabox-build.sh` 非 0 退出时，把失败的任务名和报错原文
+贴给用户、等用户决定；不要改到本机重跑、不要换机器或重建盒子重试、不要拿上一次的旧 APK 顶替。
 
 ## 盒子
 
